@@ -1,2 +1,2 @@
-responses==0.8.1
+responses==0.10.12
 flake8
