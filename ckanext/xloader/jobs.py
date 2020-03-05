@@ -13,16 +13,22 @@ import requests
 from rq import get_current_job
 import sqlalchemy as sa
 
-from ckan.plugins.toolkit import get_action, asbool
+from ckan.plugins.toolkit import get_action, asbool, ValidationError
 try:
     from ckan.plugins.toolkit import config
 except ImportError:
     from pylons import config
+import ckan.lib.navl.dictization_functions
 import ckan.lib.search as search
 
 import loader
 import db
 from job_exceptions import JobError, HTTPError, DataTooBigError, FileCouldNotBeLoadedError
+import schema
+
+LOG = logging.getLogger(__name__)
+
+_validate = ckan.lib.navl.dictization_functions.validate
 
 if config.get('ckanext.xloader.ssl_verify') in ['False', 'FALSE', '0', False, 0]:
     SSL_VERIFY = False
@@ -140,6 +146,14 @@ def xloader_data_into_datastore_(input, job_dict):
         # try again in 5 seconds just in case CKAN is slow at adding resource
         time.sleep(5)
         resource, dataset = get_resource_and_dataset(resource_id)
+
+    LOG.debug("Checking that resource is valid")
+    res_schema = schema.xloader_resource_schema(dataset)
+    resource, errors = _validate(resource, res_schema, {})
+    if errors:
+        LOG.debug("Resource is not valid: %s", errors)
+        raise JobError("Resource is not valid: {}".format(errors))
+
     resource_ckan_url = '/dataset/{}/resource/{}' \
         .format(dataset['name'], resource['id'])
     logger.info('Express Load starting: {}'.format(resource_ckan_url))
