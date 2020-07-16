@@ -249,24 +249,7 @@ def _download_resource_data(resource, data, api_key, logger):
     # get url from cloudstorage
     filename = url_parse.path.split('/')[-1]
     from ckanext.cloudstorage.storage import ResourceCloudStorage
-    from ckan import logic, model
-    from pylons import c
-
-    context = {
-        'model': model,
-        'session': model.Session,
-        'user': c.user or c.author,
-        'auth_user_obj': c.userobj
-    }
-
-    try:
-        rsc = logic.get_action('resource_show')(context, {'id': resource['id']})
-    except logic.NotFound:
-        raise JobError(_('Resource not found'))
-    except logic.NotAuthorized:
-        raise JobError(_('Unauthorized to read resource {0}'.format(resource['id'])))
-
-    storage = ResourceCloudStorage(rsc)
+    storage = ResourceCloudStorage(resource)
     url = storage.get_url_from_filename(resource['id'], filename)
 
     # check scheme
@@ -284,11 +267,6 @@ def _download_resource_data(resource, data, api_key, logger):
     cl = None
     try:
         headers = {}
-        # if resource.get('url_type') == 'upload':
-            # If this is an uploaded file to CKAN, authenticate the request,
-            # otherwise we won't get file from private resources
-            # headers['Authorization'] = api_key
-
         response = get_response(url, headers)
 
         cl = response.headers.get('content-length')
