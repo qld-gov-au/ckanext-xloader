@@ -456,7 +456,7 @@ def datastore_resource_exists(resource_id):
 
 def delete_datastore_resource(resource_id):
     from ckan import model
-    context = {'model': model, 'user': '', 'ignore_auth': True}
+    context = {'model': model, 'user': '', 'ignore_auth': True, 'agent': 'xloader'}
     try:
         p.toolkit.get_action('datastore_delete')(context, dict(
             id=resource_id, force=True))
