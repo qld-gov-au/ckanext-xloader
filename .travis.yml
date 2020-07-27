@@ -6,13 +6,10 @@ python:
 env:
     - CKAN_GIT_REPO=ckan/ckan CKAN_BRANCH=master
     - CKAN_GIT_REPO=ckan/ckan CKANVERSION=2.8
-    - CKAN_GIT_REPO=ckan/ckan CKANVERSION=2.7
     - CKAN_GIT_REPO=qld-gov-au/ckan CKAN_BRANCH=qgov-master
 services:
-    - redis-server
+    - redis
     - postgresql
-#addons:
-#    postgresql: "9.3"
 install:
     - pip install -U pip wheel
     - bash bin/travis-build.bash
@@ -34,13 +31,26 @@ jobs:
         - sh bin/travis-flake.sh
       script:
         -  sh bin/travis-flake-run.sh
-    - stage: test
+    - stage: test #master build on python 3 alpha
       env: CKAN_GIT_REPO=ckan/ckan CKANVERSION=master
       python: "3.6"
+    - stage: test #2.7 build
+      # the new trusty images of Travis cause build errors with psycopg2 in 2.7 and below, see https://github.com/travis-ci/travis-ci/issues/8897
+      # due to psycopg2 2.4 does not support newer db's, https://github.com/psycopg/psycopg2/issues/594 and no backports being given to 2.7 or older
+      # releases, we need ot hard lock for them. (needs to be on libpq-dev=9.3.* )
+      dist: trusty
+      group: deprecated-2017Q4 #must be upper case but travis "build config validation" if enabled will lowercase it and break the build
+      env: CKAN_GIT_REPO=ckan/ckan CKANVERSION=2.7
+      addons:
+        postgresql: "9.6"
   allow_failures:
     - env: CKAN_GIT_REPO=ckan/ckan CKANVERSION=master
       python: "3.6"
     - env: CKAN_GIT_REPO=ckan/ckan CKAN_BRANCH=master
+      python: "2.7" #master build on python 2 alpha (is it backwards compatible)
+    - env: CKAN_GIT_REPO=ckan/ckan CKAN_BRANCH=master
       python: "2.7"
+      dist: trusty
+      group: deprecated-2017q4
 
 cache: pip
