@@ -1,22 +1,44 @@
+os: linux
 language: python
-
-# the new trusty images of Travis cause build errors with psycopg2, see https://github.com/travis-ci/travis-ci/issues/8897
-dist: trusty
-group: deprecated-2017Q4
-
+dist: bionic
 python:
     - "2.7"
 env:
-    - CKANVERSION=master
-    - CKANVERSION=2.8
-    - CKANVERSION=2.7
-install:
-    - bash bin/travis-build.bash
+    - CKAN_GIT_REPO=ckan/ckan CKANVERSION=master
+    - CKAN_GIT_REPO=ckan/ckan CKANVERSION=2.8
+    - CKAN_GIT_REPO=ckan/ckan CKANVERSION=2.7
+    - CKAN_GIT_REPO=qld-gov-au/ckan CKAN_BRANCH=qgov-master
 services:
+    - redis-server
     - postgresql
-    - redis
 addons:
     postgresql: "9.3"
+install:
+    - pip install -U pip wheel
+    - bash bin/travis-build.bash
+    - pip install coveralls
 script: sh bin/travis-run.sh
-after_success: coveralls
-sudo: required
+after_success:
+    - coveralls
+
+stages:
+  - Flake8
+  - test
+
+jobs:
+  include:
+    - stage: Flake8
+      env: FLAKE8=True
+      install:
+        - pip install -U pip wheel
+        - sh bin/travis-flake.sh
+      script:
+        -  sh bin/travis-flake-run.sh
+    - stage: test
+      env: CKAN_GIT_REPO=ckan/ckan CKANVERSION=master
+      python: "3.6"
+  allow_failures:
+    - env: CKAN_GIT_REPO=ckan/ckan CKANVERSION=master
+      python: "3.6"
+
+cache: pip
