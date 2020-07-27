@@ -58,6 +58,8 @@ if [ $CKANVERSION == '2.7' ]
 then
     echo "Installing setuptools"
     pip install setuptools==39.0.1
+    echo "psycopg2 2.4 does not support newer db's, https://github.com/psycopg/psycopg2/issues/594"
+    pip install psycopg2==2.7.3.2
 fi
 
 if [ -f requirements-py2.txt ] && [ $ver -eq 2 ]; then

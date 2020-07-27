@@ -4,15 +4,15 @@ dist: bionic
 python:
     - "2.7"
 env:
-    - CKAN_GIT_REPO=ckan/ckan CKANVERSION=master
+    - CKAN_GIT_REPO=ckan/ckan CKAN_BRANCH=master
     - CKAN_GIT_REPO=ckan/ckan CKANVERSION=2.8
     - CKAN_GIT_REPO=ckan/ckan CKANVERSION=2.7
     - CKAN_GIT_REPO=qld-gov-au/ckan CKAN_BRANCH=qgov-master
 services:
     - redis-server
     - postgresql
-addons:
-    postgresql: "9.3"
+#addons:
+#    postgresql: "9.3"
 install:
     - pip install -U pip wheel
     - bash bin/travis-build.bash
@@ -40,5 +40,7 @@ jobs:
   allow_failures:
     - env: CKAN_GIT_REPO=ckan/ckan CKANVERSION=master
       python: "3.6"
+    - env: CKAN_GIT_REPO=ckan/ckan CKAN_BRANCH=master
+      python: "2.7"
 
 cache: pip
