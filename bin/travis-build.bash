@@ -74,14 +74,13 @@ paster datastore set-permissions -c test-core.ini | sudo -u postgres psql
 popd
 
 
-
 echo "SOLR config..."
+sudo cp ckan/ckan/config/solr/schema.xml /etc/solr/conf/schema.xml
+
 # solr is multicore for tests on ckan master now, but it's easier to run tests
 # on Travis single-core still.
 # see https://github.com/ckan/ckan/issues/2972
 sed -i -e 's/solr_url.*/solr_url = http:\/\/127.0.0.1:8983\/solr/' ckan/test-core.ini
-
-
 
 
 echo "Installing ckanext-xloader and its requirements..."
@@ -97,19 +96,27 @@ echo "Moving test.ini into a subdir..."
 mkdir -p subdir
 cp test.ini subdir
 
-echo "start solr"
-# Fix solr-jetty starting issues https://stackoverflow.com/a/56007895
-# https://github.com/Zharktas/ckanext-report/blob/py3/bin/travis-run.bash
-sudo mkdir -p /etc/systemd/system/jetty9.service.d
-printf "[Service]\nReadWritePaths=/var/lib/solr" | sudo tee /etc/systemd/system/jetty9.service.d/solr.conf
-sed '16,21d' /etc/solr/solr-jetty.xml | sudo tee /etc/solr/solr-jetty.xml
-sudo systemctl daemon-reload || echo "all good"
+echo "start solr on $TRAVIS_DIST"
 
-printf "NO_START=0\nJETTY_HOST=127.0.0.1\nJETTY_ARGS=\"jetty.http.port=8983\"\nJAVA_HOME=$JAVA_HOME" | sudo tee /etc/default/jetty9
-sudo cp ckan/ckan/config/solr/schema.xml /etc/solr/conf/schema.xml
-sudo service jetty9 restart
+#ensure we handle jetty8 and jetty9
+if [[ "$TRAVIS_DIST" == "trusty" ]]; then
+  printf "NO_START=0\nJETTY_HOST=127.0.0.1\nJETTY_PORT=8983\nJAVA_HOME=$JAVA_HOME" | sudo tee /etc/default/jetty
+  sudo service jetty restart
 
-# Wait for jetty9 to start
+else
+  # expect we are in current os, i.e. bionic
+  #[ "$TRAVIS_DIST" == "bionic" ]; then
+  # Fix solr-jetty starting issues https://stackoverflow.com/a/56007895
+  # https://github.com/Zharktas/ckanext-report/blob/py3/bin/travis-run.bash
+  sudo mkdir -p /etc/systemd/system/jetty9.service.d
+  printf "[Service]\nReadWritePaths=/var/lib/solr" | sudo tee /etc/systemd/system/jetty9.service.d/solr.conf
+  sed '16,21d' /etc/solr/solr-jetty.xml | sudo tee /etc/solr/solr-jetty.xml
+  sudo systemctl daemon-reload || echo "all good"
+  printf "NO_START=0\nJETTY_HOST=127.0.0.1\nJETTY_ARGS=\"jetty.http.port=8983\"\nJAVA_HOME=$JAVA_HOME" | sudo tee /etc/default/jetty9
+  sudo service jetty9 restart
+fi
+
+# Wait for jetty to start
 timeout 20 bash -c 'while [[ "$(curl -s -o /dev/null -I -w %{http_code} http://localhost:8983)" != "200" ]]; do sleep 2;done'
 
 
