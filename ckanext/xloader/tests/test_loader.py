@@ -26,7 +26,8 @@ class PrintLogger(object):
     def __getattr__(self, log_level):
         def print_func(msg):
             time = datetime.datetime.now().strftime('%H:%M:%S')
-            print '{} {}: {}'.format(time, log_level.capitalize(), msg)
+            print('{} {}: {}'.format(time, log_level.capitalize(), msg))
+
         return print_func
 
 

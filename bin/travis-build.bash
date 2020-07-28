@@ -17,6 +17,8 @@ else
     echo "Unknown python version: $ver"
 fi
 
+cliCommand=paster
+
 echo "Installing CKAN and its Python dependencies..."
 if [ ! -d ckan ]; then
 
@@ -34,12 +36,23 @@ if [ ! -d ckan ]; then
 
   if [ "${CKAN_BRANCH}dd" == 'dd' ]; then
     #remote lookup tags, and get latest by version-sort
-    CKAN_TAG=$(git ls-remote --tags https://github.com/$CKAN_GIT_REPO | grep refs/tags/ckan-$CKANVERSION | awk '{print $2}'| sort --version-sort | tail -n 1 | sed  's|refs/tags/||' )
+    CKAN_TAG=$(git ls-remote --tags https://github.com/$CKAN_GIT_REPO/ckan | grep refs/tags/ckan-$CKANVERSION | awk '{print $2}'| sort --version-sort | tail -n 1 | sed  's|refs/tags/||' )
     echo "CKAN tag version $CKANVERSION is: ${CKAN_TAG#ckan-}"
-    git clone --depth=50 --branch=$CKAN_TAG https://github.com/$CKAN_GIT_REPO ckan
+    git clone --depth=50 --branch=$CKAN_TAG https://github.com/$CKAN_GIT_REPO/ckan ckan
+    if [ $CKANVERSION \< '2.9' ]
+    then
+       cliCommand=paster
+    else
+        cliCommand=ckan
+    fi
   else
     echo "CKAN version: $CKAN_BRANCH"
-    git clone --depth=50 --branch=$CKAN_BRANCH https://github.com/$CKAN_GIT_REPO ckan
+    git clone --depth=50 --branch=$CKAN_BRANCH https://github.com/$CKAN_GIT_REPO/ckan ckan
+    #Master is on 2.9+ so needs ckan for cliCommand
+    if [ $CKAN_BRANCH == 'master' ]
+    then
+       cliCommand=ckan
+    fi
   fi
 fi
 
@@ -69,8 +82,14 @@ pip install -r dev-requirements.txt
 python setup.py develop
 
 echo "Initialising the database..."
-paster db init -c test-core.ini
-paster datastore set-permissions -c test-core.ini | sudo -u postgres psql
+if [ "$cliCommand" == "paster" ]; then
+  paster db init -c test-core.ini
+  paster datastore set-permissions -c test-core.ini | sudo -u postgres psql
+else
+  #ckan comand has config first then options.
+  ckan -c test-core.ini db init
+  ckan -c test-core.ini datastore set-permissions  | sudo -u postgres psql
+fi
 popd
 
 

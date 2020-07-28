@@ -1,12 +1,29 @@
-#!/bin/sh -e
+#!/bin/bash
 set -ex
 
 flake8 --version
 # stop the build if there are Python syntax errors or undefined names
 flake8 . --count --select=E901,E999,F821,F822,F823 --show-source --statistics --exclude ckan,ckanext-xloader
 
+
 ver=$(python -c"import sys; print(sys.version_info.major)")
-if [ $ver -eq 2 ]; then
+testFramework=nose
+if [ "${CKAN_BRANCH}dd" == 'dd' ]; then
+  if [ "$CKANVERSION" == '2.9' ]
+    then
+       testFramework=pytest
+    else
+        testFramework=nose
+    fi
+elif [ "$CKAN_BRANCH" == 'master' ]; then
+       testFramework=pytest
+fi
+
+# shellcheck disable=SC1072
+if [[ $ver -eq 3  ||  "$testFramework" == "pytest" ]]; then
+    echo "python version 3 or 2.9+ ckan running pytest"
+    pytest --ckan-ini=subdir/test.ini --cov=ckanext.xloader ckanext/xloader/tests
+else
     echo "python version 2 running nosetests"
 nosetests --ckan \
           --nologcapture \
@@ -16,12 +33,6 @@ nosetests --ckan \
           --cover-inclusive \
           --cover-erase \
           --cover-tests
-elif [ $ver -eq 3 ]; then
-    echo "python version 3 running pytest"
-    pytest --ckan-ini=subdir/test.ini --cov=ckanext.xloader ckanext/xloader/tests
-else
-    echo "Unknown python version: $ver"
-    exit 1
 fi
 
 # strict linting
