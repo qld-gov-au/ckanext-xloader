@@ -10,6 +10,8 @@ env:
 services:
     - redis
     - postgresql
+before_install:
+    - apt-cache policy libmagic1
 install:
     - pip install -U pip wheel
     - bash bin/travis-build.bash
