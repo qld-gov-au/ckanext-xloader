@@ -410,7 +410,6 @@ class TestxloaderDataIntoDatastore(util.PluginsMixin):
         eq_(job['status'], u'error')
         eq_(job['error'], {u'message': u'Loading file raised an error: File is not a zip file'})
 
-
     @mock_actions
     @responses.activate
     def test_messytables_xls(self):

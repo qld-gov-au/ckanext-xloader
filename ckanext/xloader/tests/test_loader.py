@@ -2,7 +2,7 @@
 import os
 
 import sqlalchemy.orm as orm
-from messytables import ReadError
+# from messytables import ReadError
 from nose.tools import assert_equal, assert_raises, assert_in, nottest
 from nose.plugins.skip import SkipTest
 import datetime
@@ -376,16 +376,16 @@ class TestLoadUnhandledTypes(TestLoadBase):
         filepath = get_sample_filepath('polling_locations.shapefile.zip')
         resource_id = 'test1'
         factories.Resource(id=resource_id)
-        #with assert_raises(LoaderError) as exception:
-        #with assert_raises(ReadError) as exception:
-        with assert_raises(Exception) as exception:
+        # with assert_raises(LoaderError) as exception:
+        # with assert_raises(ReadError) as exception:
+        with assert_raises(Exception):  # as exception:
             loader.load_csv(filepath, resource_id=resource_id,
                             mimetype='text/csv', logger=PrintLogger())
         # assert_in('Error during the load into PostgreSQL: '
-        #           'unquoted carriage return found in data',
-        #           str(exception.exception))
+        # 'unquoted carriage return found in data',
+        # str(exception.exception))
         # assert_in('Error reading CSV: %r\', Error(\'line contains NUL\'',
-        #           str(exception.exception))
+        # str(exception.exception))
 
 
 class TestLoadMessytables(TestLoadBase):
