@@ -44,6 +44,16 @@ jobs:
       env: CKAN_GIT_REPO=ckan/ckan CKANVERSION=2.7
       addons:
         postgresql: "9.6"
+    - stage: test #2.7 build
+      # ensure https://travis-ci.org/github/$yourRepo/ckanext-xloader/settings "Enable build config validation" is off if builds are not getting to testing
+      # the new trusty images of Travis cause build errors with psycopg2 in 2.7 and below, see https://github.com/travis-ci/travis-ci/issues/8897
+      # due to psycopg2 2.4 does not support newer db's, https://github.com/psycopg/psycopg2/issues/594 and no backports being given to 2.7 or older
+      # releases, we need ot hard lock for them. (needs to be on libpq-dev=9.3.* )
+      dist: trusty
+      group: deprecated-2017Q4 #must be upper case but travis "build config validation" if enabled will lowercase it and break the build
+      env: CKAN_GIT_REPO=ckan/ckan CKANVERSION=2.8
+      addons:
+        postgresql: "9.6"
   allow_failures:
     - env: CKAN_GIT_REPO=ckan/ckan CKANVERSION=master
       python: "3.6"
