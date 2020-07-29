@@ -36,7 +36,7 @@ jobs:
     - stage: test #master build on python 3 alpha
       env: CKAN_GIT_REPO=ckan CKAN_BRANCH=master
       python: "3.6"
-    - stage: test #2.7 build
+    - stage: test #2.7 build on trusty
       # ensure https://travis-ci.org/github/$yourRepo/ckanext-xloader/settings "Enable build config validation" is off if builds are not getting to testing
       # the new trusty images of Travis cause build errors with psycopg2 in 2.7 and below, see https://github.com/travis-ci/travis-ci/issues/8897
       # due to psycopg2 2.4 does not support newer db's, https://github.com/psycopg/psycopg2/issues/594 and no backports being given to 2.7 or older
@@ -46,7 +46,7 @@ jobs:
       env: CKAN_GIT_REPO=ckan CKANVERSION=2.7
       addons:
         postgresql: "9.6"
-    - stage: test #2.7 build
+    - stage: test #2.8 build on trusty
       # ensure https://travis-ci.org/github/$yourRepo/ckanext-xloader/settings "Enable build config validation" is off if builds are not getting to testing
       # the new trusty images of Travis cause build errors with psycopg2 in 2.7 and below, see https://github.com/travis-ci/travis-ci/issues/8897
       # due to psycopg2 2.4 does not support newer db's, https://github.com/psycopg/psycopg2/issues/594 and no backports being given to 2.7 or older
@@ -61,9 +61,5 @@ jobs:
       python: "3.6"
     - env: CKAN_GIT_REPO=ckan CKAN_BRANCH=master
       python: "2.7" #master build on python 2 alpha (is it backwards compatible)
-    - env: CKAN_GIT_REPO=ckan CKAN_BRANCH=master
-      python: "2.7"
-      dist: trusty
-      group: deprecated-2017q4
 
 cache: pip
