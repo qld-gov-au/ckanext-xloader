@@ -4,8 +4,6 @@ import hashlib
 import time
 import tempfile
 import json
-
-import pytz
 import urlparse
 import datetime
 import traceback
@@ -554,7 +552,7 @@ class StoringHandler(logging.Handler):
 
             conn.execute(db.LOGS_TABLE.insert().values(
                 job_id=self.task_id,
-                timestamp=datetime.datetime.now(tzinfo=pytz.utc),
+                timestamp=datetime.datetime.utcnow(),
                 message=message,
                 level=level,
                 module=module,

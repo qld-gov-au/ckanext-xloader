@@ -7,8 +7,6 @@ Loosely based on ckan-service-provider's db.py
 
 import datetime
 import json
-
-import pytz
 import six
 import sqlalchemy
 
@@ -203,7 +201,7 @@ def add_pending_job(job_id, job_type, api_key,
             job_id=job_id,
             job_type=job_type,
             status='pending',
-            requested_timestamp=datetime.datetime.now(tzinfo=pytz.utc),
+            requested_timestamp=datetime.datetime.utcnow(),
             sent_data=data,
             result_url=result_url,
             api_key=api_key))
