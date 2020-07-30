@@ -330,7 +330,7 @@ def mark_job_as_completed(job_id, data=None):
     update_dict = {
         "status": "complete",
         "data": json.dumps(data),
-        "finished_timestamp": datetime.datetime.now(tzinfo=pytz.utc),
+        "finished_timestamp": datetime.datetime.utcnow(),
     }
     _update_job(job_id, update_dict)
 
@@ -345,7 +345,7 @@ def mark_job_as_missed(job_id):
     update_dict = {
         "status": "error",
         "error": "Job delayed too long, service full",
-        "finished_timestamp": datetime.datetime.now(tzinfo=pytz.utc),
+        "finished_timestamp": datetime.datetime.utcnow(),
     }
     _update_job(job_id, update_dict)
 
@@ -364,7 +364,7 @@ def mark_job_as_errored(job_id, error_object):
     update_dict = {
         "status": "error",
         "error": error_object,
-        "finished_timestamp": datetime.datetime.now(tzinfo=pytz.utc),
+        "finished_timestamp": datetime.datetime.utcnow(),
     }
     _update_job(job_id, update_dict)
 
