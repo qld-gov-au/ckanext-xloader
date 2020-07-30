@@ -2,7 +2,6 @@ import datetime
 
 # from nose.tools import eq_
 # import mock
-import pytz
 
 import ckan.plugins as p
 from ckan.tests import helpers, factories
