@@ -156,14 +156,13 @@ def xloader_data_into_datastore_(input, job_dict):
     tmp_file, file_hash = _download_resource_data(resource, data, api_key,
                                                   logger)
 
-    # hash isn't actually stored, so this is a bit worthless at the moment
     if (resource.get('hash') == file_hash
             and not data.get('ignore_hash')):
         logger.info('Ignoring resource - the file hash hasn\'t changed: '
                     '{hash}.'.format(hash=file_hash))
         return
     logger.info('File hash: {}'.format(file_hash))
-    resource['hash'] = file_hash  # TODO write this back to the actual resource
+    resource['hash'] = file_hash
 
     def direct_load():
         fields = loader.load_csv(
@@ -173,7 +172,7 @@ def xloader_data_into_datastore_(input, job_dict):
             logger=logger)
         loader.calculate_record_count(
             resource_id=resource['id'], logger=logger)
-        set_datastore_active(data, resource, api_key, ckan_url, logger)
+        set_datastore_active(data, resource, logger)
         job_dict['status'] = 'running_but_viewable'
         callback_xloader_hook(result_url=input['result_url'],
                               api_key=api_key,
@@ -183,6 +182,9 @@ def xloader_data_into_datastore_(input, job_dict):
             fields=fields,
             resource_id=resource['id'],
             logger=logger)
+        resource['datastore_active'] = data['datastore_active']
+        update_resource(resource)
+        logger.info('File Hash updated for resource: {}'.format(resource['hash']))
 
     def messytables_load():
         try:
@@ -195,8 +197,11 @@ def xloader_data_into_datastore_(input, job_dict):
             raise
         loader.calculate_record_count(
             resource_id=resource['id'], logger=logger)
-        set_datastore_active(data, resource, api_key, ckan_url, logger)
+        set_datastore_active(data, resource, logger)
         logger.info('Finished loading with messytables')
+        resource['datastore_active'] = data['datastore_active']
+        update_resource(resource)
+        logger.info('File Hash updated for resource: {}'.format(resource['hash']))
 
     # Load it
     logger.info('Loading CSV')
@@ -237,23 +242,9 @@ def _download_resource_data(resource, data, api_key, logger):
     data['datastore_contains_all_records_of_source_file'] = False
     which will be saved to the resource later on.
     '''
-    url = resource.get('url')
-    url_parse = urlparse.urlsplit(url)
-
-    # check if it is an uploaded file
-    domain = url_parse.netloc
-    site_url = config.get('ckan.site_url')
-    if resource.get('url_type') != 'upload' and domain != site_url:
-        raise JobError('Only uploaded files can be added to the Data Store.')
-
-    # get url from cloudstorage
-    filename = url_parse.path.split('/')[-1]
-    from ckanext.cloudstorage.storage import ResourceCloudStorage
-    storage = ResourceCloudStorage(resource)
-    url = storage.get_url_from_filename(resource['id'], filename)
-
     # check scheme
-    scheme = url_parse.scheme
+    url = resource.get('url')
+    scheme = urlparse.urlsplit(url).scheme
     if scheme not in ('http', 'https', 'ftp'):
         raise JobError(
             'Only http, https, and ftp resources may be fetched.'
@@ -267,6 +258,11 @@ def _download_resource_data(resource, data, api_key, logger):
     cl = None
     try:
         headers = {}
+        if resource.get('url_type') == 'upload':
+            # If this is an uploaded file to CKAN, authenticate the request,
+            # otherwise we won't get file from private resources
+            headers['Authorization'] = api_key
+
         response = get_response(url, headers)
 
         cl = response.headers.get('content-length')
@@ -363,10 +359,11 @@ def get_tmp_file(url):
     return tmp_file
 
 
-def set_datastore_active(data, resource, api_key, ckan_url, logger):
+def set_datastore_active(data, resource, logger):
     if data.get('set_url_type', False):
         logger.debug('Setting resource.url_type = \'datapusher\'')
-        update_resource(resource, api_key, ckan_url)
+        resource['url_type'] = 'datapusher'
+        update_resource(resource)
 
     data['datastore_active'] = True
     logger.info('Setting resource.datastore_active = True')
@@ -473,27 +470,14 @@ def validate_input(input):
         raise JobError('No CKAN API key provided')
 
 
-def update_resource(resource, api_key, ckan_url):
+def update_resource(resource):
     """
     Update the given CKAN resource to say that it has been stored in datastore
     ok.
-
-    Could simply call the logic layer (the http request is a hangover from
-    datapusher).
     """
-
-    resource['url_type'] = 'datapusher'
-
-    url = get_url('resource_update', ckan_url)
-    r = requests.post(
-        url,
-        verify=SSL_VERIFY,
-        data=json.dumps(resource),
-        headers={'Content-Type': 'application/json',
-                 'Authorization': api_key}
-    )
-
-    check_response(r, url, 'CKAN')
+    from ckan import model
+    context = {'model': model, 'session': model.Session, 'ignore_auth': True}
+    get_action('resource_update')(context, resource)
 
 
 def get_resource_and_dataset(resource_id):
