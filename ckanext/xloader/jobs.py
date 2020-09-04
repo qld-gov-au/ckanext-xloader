@@ -242,9 +242,23 @@ def _download_resource_data(resource, data, api_key, logger):
     data['datastore_contains_all_records_of_source_file'] = False
     which will be saved to the resource later on.
     '''
-    # check scheme
     url = resource.get('url')
-    scheme = urlparse.urlsplit(url).scheme
+    url_parse = urlparse.urlsplit(url)
+
+    # check if it is an uploaded file
+    domain = url_parse.netloc
+    site_url = config.get('ckan.site_url')
+    if resource.get('url_type') != 'upload' and domain != site_url:
+        raise JobError('Only uploaded files can be added to the Data Store.')
+
+    # get url from cloudstorage
+    filename = url_parse.path.split('/')[-1]
+    from ckanext.cloudstorage.storage import ResourceCloudStorage
+    storage = ResourceCloudStorage(resource)
+    url = storage.get_url_from_filename(resource['id'], filename)
+
+    # check scheme
+    scheme = url_parse.scheme
     if scheme not in ('http', 'https', 'ftp'):
         raise JobError(
             'Only http, https, and ftp resources may be fetched.'
@@ -258,11 +272,6 @@ def _download_resource_data(resource, data, api_key, logger):
     cl = None
     try:
         headers = {}
-        if resource.get('url_type') == 'upload':
-            # If this is an uploaded file to CKAN, authenticate the request,
-            # otherwise we won't get file from private resources
-            headers['Authorization'] = api_key
-
         response = get_response(url, headers)
 
         cl = response.headers.get('content-length')
