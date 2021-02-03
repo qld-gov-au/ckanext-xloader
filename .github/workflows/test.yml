@@ -59,8 +59,8 @@ jobs:
       run: |
         echo "Create full text function..."
         export PGPASSWORD=pass
-        psql "postgresql://ckan_default:pass@postgres/datastore_test"  -f full_text_function.sql
-        psql "postgresql://ckan_default:pass@postgres/datastore_test"  -c "GRANT ALL PRIVILEGES ON FUNCTION populate_full_text_trigger() TO datastore_write"
+        psql "postgresql://datastore_write:pass@postgres/datastore_test"  -f full_text_function.sql
+        psql "postgresql://ckan_default:pass@postgres/datastore_test"  -c "ALTER FUNCTION populate_full_text_trigger() OWNER TO datastore_write"
 
     - name: Setup extension (CKAN >= 2.9)
       if: ${{ matrix.ckan-version != '2.7' && matrix.ckan-version != '2.8' }}
