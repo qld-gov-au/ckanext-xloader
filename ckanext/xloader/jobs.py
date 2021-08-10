@@ -217,8 +217,15 @@ def xloader_data_into_datastore_(input, job_dict):
                 direct_load()
             except JobError as e:
                 logger.warning('Load using COPY failed: {}'.format(e))
-                logger.info('Trying again with messytables')
-                messytables_load()
+                just_load_with_direct_load = asbool(config.get(
+                    'ckanext.xloader.just_load_with_direct_load', False))
+                logger.info("'Just load with direct load' mode is: {}".format(
+                    just_load_with_direct_load))
+                if just_load_with_direct_load:
+                    logger.info('Skipping messytables loading')
+                else:
+                    logger.info('Trying again with messytables')
+                    messytables_load()
     except FileCouldNotBeLoadedError as e:
         logger.warning('Loading excerpt for this format not supported.')
         logger.error('Loading file raised an error: {}'.format(e))
