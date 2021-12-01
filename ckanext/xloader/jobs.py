@@ -145,6 +145,30 @@ def xloader_data_into_datastore_(input, job_dict):
         .format(dataset['name'], resource['id'])
     logger.info('Express Load starting: %s', resource_ckan_url)
 
+    # only load validated resources to the datastore
+    if 'validation' in config.get('ckan.plugins'):
+        try:
+            validation = get_action(u'resource_validation_show')(
+                {u'ignore_auth': True},
+                {u'resource_id': resource_id})
+
+        except ObjectNotFound:
+            logger.info('Submitting resource for validation')
+            validation = get_action(u'resource_validation_run')(
+                {u'ignore_auth': True},
+                {u'resource_id': resource_id,
+                 u'async': True})
+            # give a little buffer to validate resource
+            time.sleep(10)
+            logger.info('The resource will be uploaded to datastore after validation is complete')
+
+        try:
+            logger.info('Validation status for the resource is: ' + validation.get('status'))
+            if validation.get('status') != 'success':
+                raise JobError('Only validated resources can be added to the Data Store.')
+        except AttributeError:
+            raise JobError('Unable to validate resource')
+
     # check if the resource url_type is a datastore
     if resource.get('url_type') == 'datastore':
         logger.info('Ignoring resource - url_type=datastore - dump files are '
