@@ -1,18 +1,22 @@
+from __future__ import division
+from __future__ import absolute_import
 import math
 import logging
 import hashlib
 import time
 import tempfile
 import json
-import urlparse
 import datetime
 import traceback
 import sys
+import six
 
+from six.moves.urllib.parse import urlsplit
 import requests
 from rq import get_current_job
 import sqlalchemy as sa
 
+import ckan.model as model
 from ckan.plugins.toolkit import get_action, asbool, ObjectNotFound
 try:
     from ckan.plugins.toolkit import config
@@ -20,14 +24,11 @@ except ImportError:
     from pylons import config
 import ckan.lib.search as search
 
-import loader
-import db
-from job_exceptions import JobError, HTTPError, DataTooBigError, FileCouldNotBeLoadedError
+from . import loader
+from . import db
+from .job_exceptions import JobError, HTTPError, DataTooBigError, FileCouldNotBeLoadedError
 
-if config.get('ckanext.xloader.ssl_verify') in ['False', 'FALSE', '0', False, 0]:
-    SSL_VERIFY = False
-else:
-    SSL_VERIFY = True
+SSL_VERIFY = asbool(config.get('ckanext.xloader.ssl_verify', True))
 if not SSL_VERIFY:
     requests.packages.urllib3.disable_warnings()
 
@@ -84,7 +85,7 @@ def xloader_data_into_datastore(input):
         errored = True
     except Exception as e:
         db.mark_job_as_errored(
-            job_id, traceback.format_tb(sys.exc_traceback)[-1] + repr(e))
+            job_id, traceback.format_tb(sys.exc_info()[2])[-1] + repr(e))
         job_dict['status'] = 'error'
         job_dict['error'] = str(e)
         log = logging.getLogger(__name__)
@@ -132,19 +133,17 @@ def xloader_data_into_datastore_(input, job_dict):
 
     data = input['metadata']
 
-    ckan_url = data['ckan_url']
     resource_id = data['resource_id']
     api_key = input.get('api_key')
-
     try:
-        resource, dataset = get_resource_and_dataset(resource_id)
-    except (JobError, ObjectNotFound) as e:
+        resource, dataset = get_resource_and_dataset(resource_id, api_key)
+    except (JobError, ObjectNotFound):
         # try again in 5 seconds just in case CKAN is slow at adding resource
         time.sleep(5)
-        resource, dataset = get_resource_and_dataset(resource_id)
+        resource, dataset = get_resource_and_dataset(resource_id, api_key)
     resource_ckan_url = '/dataset/{}/resource/{}' \
         .format(dataset['name'], resource['id'])
-    logger.info('Express Load starting: {}'.format(resource_ckan_url))
+    logger.info('Express Load starting: %s', resource_ckan_url)
 
     # check if the resource url_type is a datastore
     if resource.get('url_type') == 'datastore':
@@ -161,7 +160,7 @@ def xloader_data_into_datastore_(input, job_dict):
         logger.info('Ignoring resource - the file hash hasn\'t changed: '
                     '{hash}.'.format(hash=file_hash))
         return
-    logger.info('File hash: {}'.format(file_hash))
+    logger.info('File hash: %s', file_hash)
     resource['hash'] = file_hash
 
     def direct_load():
@@ -177,14 +176,14 @@ def xloader_data_into_datastore_(input, job_dict):
         callback_xloader_hook(result_url=input['result_url'],
                               api_key=api_key,
                               job_dict=job_dict)
-        logger.info('Data now available to users: {}'.format(resource_ckan_url))
+        logger.info('Data now available to users: %s', resource_ckan_url)
         loader.create_column_indexes(
             fields=fields,
             resource_id=resource['id'],
             logger=logger)
         update_resource(resource={'id': resource['id'], 'hash': resource['hash']},
                         patch_only=True)
-        logger.info('File Hash updated for resource: {}'.format(resource['hash']))
+        logger.info('File Hash updated for resource: %s', resource['hash'])
 
     def messytables_load():
         try:
@@ -193,7 +192,7 @@ def xloader_data_into_datastore_(input, job_dict):
                               mimetype=resource.get('format'),
                               logger=logger)
         except JobError as e:
-            logger.error('Error during messytables load: {}'.format(e))
+            logger.error('Error during messytables load: %s', e)
             raise
         loader.calculate_record_count(
             resource_id=resource['id'], logger=logger)
@@ -201,14 +200,14 @@ def xloader_data_into_datastore_(input, job_dict):
         logger.info('Finished loading with messytables')
         update_resource(resource={'id': resource['id'], 'hash': resource['hash']},
                         patch_only=True)
-        logger.info('File Hash updated for resource: {}'.format(resource['hash']))
+        logger.info('File Hash updated for resource: %s', resource['hash'])
 
     # Load it
     logger.info('Loading CSV')
     just_load_with_messytables = asbool(config.get(
         'ckanext.xloader.just_load_with_messytables', False))
-    logger.info("'Just load with messytables' mode is: {}".format(
-        just_load_with_messytables))
+    logger.info("'Just load with messytables' mode is: %s",
+                just_load_with_messytables)
     try:
         if just_load_with_messytables:
             messytables_load()
@@ -216,7 +215,7 @@ def xloader_data_into_datastore_(input, job_dict):
             try:
                 direct_load()
             except JobError as e:
-                logger.warning('Load using COPY failed: {}'.format(e))
+                logger.warning('Load using COPY failed: %s', e)
                 just_load_with_direct_load = asbool(config.get(
                     'ckanext.xloader.just_load_with_direct_load', False))
                 logger.info("'Just load with direct load' mode is: {}".format(
@@ -228,7 +227,7 @@ def xloader_data_into_datastore_(input, job_dict):
                     messytables_load()
     except FileCouldNotBeLoadedError as e:
         logger.warning('Loading excerpt for this format not supported.')
-        logger.error('Loading file raised an error: {}'.format(e))
+        logger.error('Loading file raised an error: %s', e)
         raise JobError('Loading file raised an error: {}'.format(e))
 
     tmp_file.close()
@@ -250,7 +249,7 @@ def _download_resource_data(resource, data, api_key, logger):
     which will be saved to the resource later on.
     '''
     url = resource.get('url')
-    url_parse = urlparse.urlsplit(url)
+    url_parse = urlsplit(url)
 
     # check if it is an uploaded file
     domain = url_parse.netloc
@@ -265,7 +264,7 @@ def _download_resource_data(resource, data, api_key, logger):
     url = storage.get_url_from_filename(resource['id'], filename)
 
     # check scheme
-    scheme = url_parse.scheme
+    scheme = urlsplit(url).scheme
     if scheme not in ('http', 'https', 'ftp'):
         raise JobError(
             'Only http, https, and ftp resources may be fetched.'
@@ -283,6 +282,7 @@ def _download_resource_data(resource, data, api_key, logger):
 
         cl = response.headers.get('content-length')
         if cl and int(cl) > MAX_CONTENT_LENGTH:
+            response.close()
             raise DataTooBigError()
 
         # download the file to a tempfile on disk
@@ -292,6 +292,7 @@ def _download_resource_data(resource, data, api_key, logger):
                 raise DataTooBigError
             tmp_file.write(chunk)
             m.update(chunk)
+        response.close()
         data['datastore_contains_all_records_of_source_file'] = True
 
     except DataTooBigError:
@@ -311,16 +312,17 @@ def _download_resource_data(resource, data, api_key, logger):
         line_count = 0
         m = hashlib.md5()
         for line in response.iter_lines(CHUNK_SIZE):
-            tmp_file.write(line + '\n')
+            tmp_file.write(line + b'\n')
             m.update(line)
             length += len(line)
             line_count += 1
             if length > MAX_CONTENT_LENGTH or line_count >= MAX_EXCERPT_LINES:
                 break
+        response.close()
         data['datastore_contains_all_records_of_source_file'] = False
     except requests.exceptions.HTTPError as error:
         # status code error
-        logger.debug('HTTP error: {}'.format(error))
+        logger.debug('HTTP error: %s', error)
         raise HTTPError(
             "Xloader received a bad HTTP response when trying to download "
             "the data file", status_code=error.response.status_code,
@@ -334,7 +336,7 @@ def _download_resource_data(resource, data, api_key, logger):
             err_message = str(e.reason)
         except AttributeError:
             err_message = str(e)
-        logger.warning('URL error: {}'.format(err_message))
+        logger.warning('URL error: %s', err_message)
         raise HTTPError(
             message=err_message, status_code=None,
             request_url=url, response=None)
@@ -347,13 +349,12 @@ def _download_resource_data(resource, data, api_key, logger):
 
 def get_response(url, headers):
     def get_url():
-        return requests.get(
-            url,
-            headers=headers,
-            timeout=DOWNLOAD_TIMEOUT,
-            verify=SSL_VERIFY,
-            stream=True,  # just gets the headers for now
-        )
+        kwargs = {'headers': headers, 'timeout': DOWNLOAD_TIMEOUT,
+                  'verify': SSL_VERIFY, 'stream': True} # just gets the headers for now
+        if 'ckan.download_proxy' in config:
+            proxy = config.get('ckan.download_proxy')
+            kwargs['proxies'] = {'http': proxy, 'https': proxy}
+        return requests.get(url, **kwargs)
     response = get_url()
     if response.status_code == 202:
         # Seen: https://data-cdfw.opendata.arcgis.com/datasets
@@ -361,7 +362,7 @@ def get_response(url, headers):
         # 202 can mean other things, but there's no harm in retries.
         wait = 1
         while wait < 120 and response.status_code == 202:
-            # logger.info('Retrying after {}s'.format(wait))
+            # logger.info('Retrying after %ss', wait)
             time.sleep(wait)
             response = get_url()
             wait *= 3
@@ -409,6 +410,7 @@ def callback_xloader_hook(result_url, api_key, job_dict):
         result = requests.post(
             result_url,
             data=json.dumps(job_dict, cls=DatetimeJsonEncoder),
+            verify=SSL_VERIFY,
             headers=headers)
     except requests.ConnectionError:
         return False
@@ -494,16 +496,24 @@ def update_resource(resource, patch_only=False):
     """
     action = 'resource_update' if not patch_only else 'resource_patch'
     from ckan import model
-    context = {'model': model, 'session': model.Session, 'ignore_auth': True}
+    user = get_action('get_site_user')({'model': model, 'ignore_auth': True}, {})
+    context = {'model': model, 'session': model.Session, 'ignore_auth': True,
+               'user': user['name'], 'auth_user_obj': None}
     get_action(action)(context, resource)
 
 
-def get_resource_and_dataset(resource_id):
+def get_resource_and_dataset(resource_id, api_key):
     """
     Gets available information about the resource and its dataset from CKAN
     """
-    res_dict = get_action('resource_show')(None, {'id': resource_id})
-    pkg_dict = get_action('package_show')(None, {'id': res_dict['package_id']})
+    user = model.Session.query(model.User).filter_by(
+        apikey=api_key).first()
+    if user is not None:
+        context = {'user': user.name}
+    else:
+        context = None
+    res_dict = get_action('resource_show')(context, {'id': resource_id})
+    pkg_dict = get_action('package_show')(context, {'id': res_dict['package_id']})
     return res_dict, pkg_dict
 
 
@@ -511,7 +521,7 @@ def get_url(action, ckan_url):
     """
     Get url for ckan action
     """
-    if not urlparse.urlsplit(ckan_url).scheme:
+    if not urlsplit(ckan_url).scheme:
         ckan_url = 'http://' + ckan_url.lstrip('/')
     ckan_url = ckan_url.rstrip('/')
     return '{ckan_url}/api/3/action/{action}'.format(
@@ -568,10 +578,10 @@ class StoringHandler(logging.Handler):
         try:
             # Turn strings into unicode to stop SQLAlchemy
             # "Unicode type received non-unicode bind param value" warnings.
-            message = unicode(record.getMessage())
-            level = unicode(record.levelname)
-            module = unicode(record.module)
-            funcName = unicode(record.funcName)
+            message = six.text_type(record.getMessage())
+            level = six.text_type(record.levelname)
+            module = six.text_type(record.module)
+            funcName = six.text_type(record.funcName)
 
             conn.execute(db.LOGS_TABLE.insert().values(
                 job_id=self.task_id,
@@ -600,5 +610,5 @@ def printable_file_size(size_bytes):
     size_name = ('bytes', 'KB', 'MB', 'GB', 'TB')
     i = int(math.floor(math.log(size_bytes, 1024)))
     p = math.pow(1024, i)
-    s = round(size_bytes / p, 1)
+    s = round(float(size_bytes) / p, 1)
     return "%s %s" % (s, size_name[i])
