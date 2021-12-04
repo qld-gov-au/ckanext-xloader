@@ -40,7 +40,7 @@ class XLoaderFormats(object):
 class xloaderPlugin(plugins.SingletonPlugin):
     plugins.implements(plugins.IConfigurer)
     plugins.implements(plugins.IConfigurable)
-    plugins.implements(plugins.IResourceUrlChange)
+    # plugins.implements(plugins.IResourceUrlChange)     # disable automatic submission of resource to xloader
     plugins.implements(plugins.IActions)
     plugins.implements(plugins.IAuthFunctions)
     plugins.implements(plugins.ITemplateHelpers)
@@ -123,11 +123,12 @@ class xloaderPlugin(plugins.SingletonPlugin):
         )
         self._submit_to_xloader(resource_dict)
 
-    # IResourceController                
+    # IResourceController
 
-    def after_create(self, context, resource_dict):
+    # disable automatic submission of resource to xloader
+    # def after_create(self, context, resource_dict):
 
-        self._submit_to_xloader(resource_dict)
+        # self._submit_to_xloader(resource_dict)
 
     def _submit_to_xloader(self, resource_dict):
         context = {'model': model, 'ignore_auth': True,
