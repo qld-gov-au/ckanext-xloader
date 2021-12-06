@@ -1,16 +1,20 @@
 'Load a CSV into postgres'
+from __future__ import absolute_import
+from builtins import zip
+from builtins import str
 import os
 import os.path
 import tempfile
 import itertools
 import csv
 
+import six
 import psycopg2
 import messytables
 from unidecode import unidecode
 
 import ckan.plugins as p
-from job_exceptions import LoaderError, FileCouldNotBeLoadedError
+from .job_exceptions import LoaderError, FileCouldNotBeLoadedError
 import ckan.plugins.toolkit as tk
 try:
     from ckan.plugins.toolkit import config
@@ -61,17 +65,19 @@ def load_csv(csv_filepath, resource_id, mimetype='text/csv', logger=None):
         if not table_set.tables:
             raise LoaderError('Could not detect tabular data in this file')
         row_set = table_set.tables.pop()
-        header_offset, headers = messytables.headers_guess(row_set.sample)
-
+        try:
+            header_offset, headers = messytables.headers_guess(row_set.sample)
+        except messytables.ReadError as e:
+            raise LoaderError('Messytables error: {}'.format(e))
     # Some headers might have been converted from strings to floats and such.
     headers = encode_headers(headers)
 
     # Guess the delimiter used in the file
-    with open(csv_filepath, 'r') as f:
+    with open(csv_filepath, 'rb') as f:
         header_line = f.readline()
     try:
         sniffer = csv.Sniffer()
-        delimiter = sniffer.sniff(header_line).delimiter
+        delimiter = sniffer.sniff(six.ensure_text(header_line)).delimiter
     except csv.Error:
         logger.warning('Could not determine delimiter from file, use default ","')
         delimiter = ','
@@ -140,7 +146,7 @@ def load_csv(csv_filepath, resource_id, mimetype='text/csv', logger=None):
                 if f['id'] in existing_info:
                     f['info'] = existing_info[f['id']]
 
-        logger.info('Fields: {}'.format(fields))
+        logger.info('Fields: %s', fields)
 
         # Create table
         from ckan import model
@@ -148,7 +154,7 @@ def load_csv(csv_filepath, resource_id, mimetype='text/csv', logger=None):
         data_dict = dict(
             resource_id=resource_id,
             fields=fields,
-            )
+        )
         data_dict['records'] = None  # just create an empty table
         data_dict['force'] = True  # TODO check this - I don't fully
         # understand read-only/datastore resources
@@ -215,13 +221,13 @@ def load_csv(csv_filepath, resource_id, mimetype='text/csv', logger=None):
                                                         for h in headers]),
                                 delimiter=delimiter,
                                 encoding='UTF8',
-                                ),
+                            ),
                             f)
                     except psycopg2.DataError as e:
                         # e is a str but with foreign chars e.g.
                         # 'extra data: "paul,pa\xc3\xbcl"\n'
                         # but logging and exceptions need a normal (7 bit) str
-                        error_str = str(e).decode('ascii', 'replace').encode('ascii', 'replace')
+                        error_str = str(e)
                         logger.warning(error_str)
                         raise LoaderError('Error during the load into PostgreSQL:'
                                           ' {}'.format(error_str))
@@ -249,7 +255,7 @@ def create_column_indexes(fields, resource_id, logger):
     data_dict = dict(
         resource_id=resource_id,
         fields=fields,
-        )
+    )
     engine = get_write_engine()
     connection = context['connection'] = engine.connect()
 
@@ -278,7 +284,7 @@ def load_table(table_filepath, resource_id, mimetype='text/csv', logger=None):
 
         try:
             table_set = messytables.any_tableset(tmp, mimetype=ct, extension=ct)
-        except messytables.ReadError as e:
+        except messytables.ReadError:
             # try again with format
             tmp.seek(0)
             try:
@@ -308,10 +314,11 @@ def load_table(table_filepath, resource_id, mimetype='text/csv', logger=None):
 
         # override with types user requested
         if existing_info:
-            types = [{
-                'text': messytables.StringType(),
-                'numeric': messytables.DecimalType(),
-                'timestamp': messytables.DateUtilType(),
+            types = [
+                {
+                    'text': messytables.StringType(),
+                    'numeric': messytables.DecimalType(),
+                    'timestamp': messytables.DateUtilType(),
                 }.get(existing_info.get(h, {}).get('type_override'), t)
                 for t, h in zip(types, headers)]
 
@@ -351,7 +358,7 @@ def load_table(table_filepath, resource_id, mimetype='text/csv', logger=None):
                     h['info'] = existing_info[h['id']]
                     # create columns with types user requested
                     type_override = existing_info[h['id']].get('type_override')
-                    if type_override in _TYPE_MAPPING.values():
+                    if type_override in list(_TYPE_MAPPING.values()):
                         h['type'] = type_override
 
         logger.info('Determined headers and types: {headers}'.format(
@@ -524,11 +531,11 @@ def _populate_fulltext(connection, resource_id, fields):
                 'coalesce({}, \'\')'.format(
                     identifier(field['id'])
                     + ('::text' if field['type'] != 'text' else '')
-                    )
+                )
                 for field in fields
                 if not field['id'].startswith('_')
-                )
             )
+        )
     connection.execute(sql)
 
 
