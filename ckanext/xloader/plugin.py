@@ -40,7 +40,7 @@ class XLoaderFormats(object):
 class xloaderPlugin(plugins.SingletonPlugin):
     plugins.implements(plugins.IConfigurer)
     plugins.implements(plugins.IConfigurable)
-    # plugins.implements(plugins.IResourceUrlChange)     # disable automatic submission of resource to xloader
+    plugins.implements(plugins.IResourceUrlChange)
     plugins.implements(plugins.IActions)
     plugins.implements(plugins.IAuthFunctions)
     plugins.implements(plugins.ITemplateHelpers)
@@ -112,6 +112,10 @@ class xloaderPlugin(plugins.SingletonPlugin):
     # IResourceUrlChange
 
     def notify(self, resource):
+        # disable automatic submission of resource to xloader if validation is enabled
+        if 'validation' in config.get('ckan.plugins'):
+            return
+
         context = {
             "model": model,
             "ignore_auth": True,
@@ -125,10 +129,12 @@ class xloaderPlugin(plugins.SingletonPlugin):
 
     # IResourceController
 
-    # disable automatic submission of resource to xloader
-    # def after_create(self, context, resource_dict):
+    def after_create(self, context, resource_dict):
+        # disable automatic submission of resource to xloader if validation is enabled
+        if 'validation' in config.get('ckan.plugins'):
+            return
 
-        # self._submit_to_xloader(resource_dict)
+        self._submit_to_xloader(resource_dict)
 
     def _submit_to_xloader(self, resource_dict):
         context = {'model': model, 'ignore_auth': True,
