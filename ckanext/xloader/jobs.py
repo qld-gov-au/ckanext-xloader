@@ -286,7 +286,7 @@ def _download_resource_data(resource, data, api_key, logger):
         if resource.get('url_type') == 'upload':
             # If this is an uploaded file to CKAN, authenticate the request,
             # otherwise we won't get file from private resources
-            headers['Authorization'] = api_key
+            headers['X-CKAN-API-Key'] = api_key
 
             # Add a constantly changing parameter to bypass URL caching.
             # If we're running XLoader, then either the resource has
