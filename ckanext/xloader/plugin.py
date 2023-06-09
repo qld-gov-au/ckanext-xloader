@@ -97,6 +97,10 @@ class xloaderPlugin(plugins.SingletonPlugin):
     # IResourceUrlChange
 
     def notify(self, resource):
+        # disable automatic submission of resource to xloader if validation is enabled
+        if 'validation' in toolkit.config.get('ckan.plugins'):
+            return
+
         context = {
             "ignore_auth": True,
         }
@@ -109,6 +113,11 @@ class xloaderPlugin(plugins.SingletonPlugin):
         self._submit_to_xloader(resource_dict)
 
     # IResourceController
+
+    def after_create(self, context, resource_dict):
+        # disable automatic submission of resource to xloader if validation is enabled
+        if 'validation' in toolkit.config.get('ckan.plugins'):
+            return
 
     def after_resource_create(self, context, resource_dict):
         self._submit_to_xloader(resource_dict)

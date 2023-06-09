@@ -219,8 +219,15 @@ def xloader_data_into_datastore_(input, job_dict):
                 direct_load()
             except JobError as e:
                 logger.warning('Load using COPY failed: %s', e)
-                logger.info('Trying again with tabulator')
-                tabulator_load()
+                just_load_with_direct_load = asbool(config.get(
+                    'ckanext.xloader.just_load_with_direct_load', False))
+                logger.info("'Just load with direct load' mode is: {}".format(
+                    just_load_with_direct_load))
+                if just_load_with_direct_load:
+                    logger.info('Skipping messytables loading')
+                else:
+                    logger.info('Trying again with tabulator')
+                    tabulator_load()
     except FileCouldNotBeLoadedError as e:
         logger.warning('Loading excerpt for this format not supported.')
         logger.error('Loading file raised an error: %s', e)
@@ -244,8 +251,23 @@ def _download_resource_data(resource, data, api_key, logger):
     data['datastore_contains_all_records_of_source_file'] = False
     which will be saved to the resource later on.
     '''
-    # check scheme
     url = resource.get('url')
+    url_parts = urlsplit(url)
+    scheme = url_parts.scheme
+
+    # check if it is an uploaded file
+    domain = url_parts.netloc
+    site_url = config.get('ckan.site_url')
+    if resource.get('url_type') != 'upload' and domain != site_url:
+        raise JobError('Only uploaded files can be added to the Data Store.')
+
+    # get url from cloudstorage
+    filename = url_parts.path.split('/')[-1]
+    from ckanext.cloudstorage.storage import ResourceCloudStorage
+    storage = ResourceCloudStorage(resource)
+    url = storage.get_url_from_filename(resource['id'], filename)
+
+    # check scheme
     url_parts = urlsplit(url)
     scheme = url_parts.scheme
     if scheme not in ('http', 'https', 'ftp'):
