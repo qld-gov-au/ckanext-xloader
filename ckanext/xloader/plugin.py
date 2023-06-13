@@ -206,4 +206,5 @@ class xloaderPlugin(plugins.SingletonPlugin):
             'xloader_status': xloader_helpers.xloader_status,
             'xloader_status_description':
             xloader_helpers.xloader_status_description,
+            'is_xloader_format': xloader_helpers.is_xloader_format,
         }
