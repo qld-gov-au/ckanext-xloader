@@ -128,10 +128,11 @@ class xloaderPlugin(plugins.SingletonPlugin):
         if not isinstance(entity, Resource):
             return
 
-        if toolkit.h.asbool(toolkit.config.get('ckanext.xloader.limit_datastore_tables', False)) \
+        if p.plugin_loaded('datastore') \
+        and toolkit.h.asbool(toolkit.config.get('ckanext.xloader.limit_datastore_tables', False)) \
         and (not XLoaderFormats.is_it_an_xloader_format(getattr(entity, 'format', u'')) \
         or getattr(entity, 'url_changed', False)):
-            p.toolkit.enqueue_job(fn=self._remove_unsupported_resource_from_datastore, args=[entity.id])
+            p.toolkit.enqueue_job(fn=_remove_unsupported_resource_from_datastore, args=[entity.id])
 
         # disable automatic submission of resource to xloader
         # if validation is enabled or the url has not changed
@@ -205,38 +206,6 @@ class xloaderPlugin(plugins.SingletonPlugin):
             log.critical(e)
             pass
 
-
-    def _remove_unsupported_resource_from_datastore(self, resource_id):
-        """
-        Callback to remove unsupported datastore tables.
-        Controlled by config value: ckanext.xloader.limit_datastore_tables.
-        Double check the resource format. Only supported Xloader formats should have datastore tables.
-        If the resource format is not supported, we should delete the datastore tables.
-        """
-        lc = ckanapi.LocalCKAN()
-        try:
-            res = lc.action.resource_show(id=resource_id)
-            pkg = lc.action.package_show(id=res['package_id'])
-        except toolkit.ObjectNotFound:
-            log.error('Resource %s does not exist.' % res['id'])
-            return
-
-        # only remove datastore tables from dataset types
-        if pkg['type'] != 'dataset':
-            return
-
-        if not XLoaderFormats.is_it_an_xloader_format(res.get(u'format', u'')) \
-        and (res['url_type'] == 'upload' or res['url_type'] == '') \
-        and res['datastore_active']:
-            log.info('Unsupported resource format "{}". Deleting datastore tables for resource {}'
-                .format(res.get(u'format', u'').lower(), res['id']))
-            try:
-                lc.action.datastore_delete(resource_id=res['id'], force=True)
-                log.info('Datastore table dropped for resource %s' % res['id'])
-            except toolkit.ObjectNotFound:
-                log.error('Datastore table for resource %s does not exist' % res['id'])
-
-
     # IActions
 
     def get_actions(self):
@@ -263,3 +232,34 @@ class xloaderPlugin(plugins.SingletonPlugin):
             xloader_helpers.xloader_status_description,
             'is_xloader_format': xloader_helpers.is_xloader_format,
         }
+
+
+def _remove_unsupported_resource_from_datastore(resource_id):
+    """
+    Callback to remove unsupported datastore tables.
+    Controlled by config value: ckanext.xloader.limit_datastore_tables.
+    Double check the resource format. Only supported Xloader formats should have datastore tables.
+    If the resource format is not supported, we should delete the datastore tables.
+    """
+    lc = ckanapi.LocalCKAN()
+    try:
+        res = lc.action.resource_show(id=resource_id)
+        pkg = lc.action.package_show(id=res['package_id'])
+    except toolkit.ObjectNotFound:
+        log.error('Resource %s does not exist.' % res['id'])
+        return
+
+    # only remove datastore tables from dataset types
+    if pkg['type'] != 'dataset':
+        return
+
+    if not XLoaderFormats.is_it_an_xloader_format(res.get(u'format', u'')) \
+    and (res['url_type'] == 'upload' or res['url_type'] == '') \
+    and res['datastore_active']:
+        log.info('Unsupported resource format "{}". Deleting datastore tables for resource {}'
+            .format(res.get(u'format', u'').lower(), res['id']))
+        try:
+            lc.action.datastore_delete(resource_id=res['id'], force=True)
+            log.info('Datastore table dropped for resource %s' % res['id'])
+        except toolkit.ObjectNotFound:
+            log.error('Datastore table for resource %s does not exist' % res['id'])
