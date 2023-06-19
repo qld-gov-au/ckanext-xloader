@@ -128,10 +128,7 @@ class xloaderPlugin(plugins.SingletonPlugin):
         if not isinstance(entity, Resource):
             return
 
-        if p.plugin_loaded('datastore') \
-        and toolkit.h.asbool(toolkit.config.get('ckanext.xloader.limit_datastore_tables', False)) \
-        and (not XLoaderFormats.is_it_an_xloader_format(getattr(entity, 'format', u'')) \
-        or getattr(entity, 'url_changed', False)):
+        if _should_remove_unsupported_resource_from_datastore(entity):
             p.toolkit.enqueue_job(fn=_remove_unsupported_resource_from_datastore, args=[entity.id])
 
         # disable automatic submission of resource to xloader
@@ -234,6 +231,24 @@ class xloaderPlugin(plugins.SingletonPlugin):
         }
 
 
+def _should_remove_unsupported_resource_from_datastore(res_dict_or_obj):
+    if not toolkit.asbool(toolkit.config.get('ckanext.xloader.limit_datastore_tables', False)):
+        return False
+    if isinstance(res_dict_or_obj, Resource):
+        return ((not XLoaderFormats.is_it_an_xloader_format(getattr(res_dict_or_obj, 'format', u''))
+                    or getattr(res_dict_or_obj, 'url_changed', False))
+                and (getattr(res_dict_or_obj, 'url_type') == 'upload'
+                    or getattr(res_dict_or_obj, 'url_type') == '')
+                and (getattr(res_dict_or_obj, 'datastore_active', False) 
+                    or getattr(res_dict_or_obj, 'extras', {}).get('datastore_active', False)))
+    return ((not XLoaderFormats.is_it_an_xloader_format(res_dict_or_obj.get('format', u''))
+                or res_dict_or_obj.get('url_changed', False))
+            and (res_dict_or_obj.get('url_type') == 'upload'
+                or res_dict_or_obj.get('url_type') == '')
+            and (res_dict_or_obj.get('datastore_active', False) 
+                or res_dict_or_obj.get('extras', {}).get('datastore_active', False)))
+
+
 def _remove_unsupported_resource_from_datastore(resource_id):
     """
     Callback to remove unsupported datastore tables.
@@ -253,9 +268,7 @@ def _remove_unsupported_resource_from_datastore(resource_id):
     if pkg['type'] != 'dataset':
         return
 
-    if not XLoaderFormats.is_it_an_xloader_format(res.get(u'format', u'')) \
-    and (res['url_type'] == 'upload' or res['url_type'] == '') \
-    and res['datastore_active']:
+    if _should_remove_unsupported_resource_from_datastore(res):
         log.info('Unsupported resource format "{}". Deleting datastore tables for resource {}'
             .format(res.get(u'format', u'').lower(), res['id']))
         try:
