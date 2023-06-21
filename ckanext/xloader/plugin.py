@@ -232,7 +232,7 @@ class xloaderPlugin(plugins.SingletonPlugin):
 
 
 def _should_remove_unsupported_resource_from_datastore(res_dict_or_obj):
-    if not toolkit.asbool(toolkit.config.get('ckanext.xloader.limit_datastore_tables', False)):
+    if not toolkit.asbool(toolkit.config.get('ckanext.xloader.clean_datastore_tables', False)):
         return False
     if isinstance(res_dict_or_obj, Resource):
         res_dict_or_obj = res_dict_or_obj.__dict__
