@@ -259,7 +259,7 @@ def _remove_unsupported_resource_from_datastore(resource_id):
         log.error('Resource %s does not exist.' % res['id'])
         return
 
-    # only remove datastore tables from dataset types
+    # only remove datastore tables from dataset types (canada fork only)
     if pkg['type'] != 'dataset':
         return
 
