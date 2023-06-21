@@ -132,7 +132,7 @@ class xloaderPlugin(plugins.SingletonPlugin):
             p.toolkit.enqueue_job(fn=_remove_unsupported_resource_from_datastore, args=[entity.id])
 
         # disable automatic submission of resource to xloader
-        # if validation is enabled or the url has not changed
+        # if validation is enabled or the url has not changed (canada fork only)
         if 'validation' in config.get('ckan.plugins') \
         or not getattr(entity, 'url_changed', False):
             return
