@@ -235,12 +235,7 @@ def _should_remove_unsupported_resource_from_datastore(res_dict_or_obj):
     if not toolkit.asbool(toolkit.config.get('ckanext.xloader.limit_datastore_tables', False)):
         return False
     if isinstance(res_dict_or_obj, Resource):
-        return ((not XLoaderFormats.is_it_an_xloader_format(getattr(res_dict_or_obj, 'format', u''))
-                    or getattr(res_dict_or_obj, 'url_changed', False))
-                and (getattr(res_dict_or_obj, 'url_type') == 'upload'
-                    or getattr(res_dict_or_obj, 'url_type') == '')
-                and (getattr(res_dict_or_obj, 'datastore_active', False) 
-                    or getattr(res_dict_or_obj, 'extras', {}).get('datastore_active', False)))
+        res_dict_or_obj = res_dict_or_obj.__dict__
     return ((not XLoaderFormats.is_it_an_xloader_format(res_dict_or_obj.get('format', u''))
                 or res_dict_or_obj.get('url_changed', False))
             and (res_dict_or_obj.get('url_type') == 'upload'
