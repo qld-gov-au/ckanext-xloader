@@ -265,6 +265,11 @@ Configuration:
     # to True.
     ckanext.xloader.ssl_verify = True
 
+    # Enqueue jobs to remove Datastore tables from Resources that have a format
+    # that is not in ckanext.xloader.formats after a Resource is updated.
+    # Default to False.
+    ckanext.xloader.clean_datastore_tables = False
+
 ------------------------
 Developer installation
 ------------------------
