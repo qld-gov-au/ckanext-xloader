@@ -247,7 +247,7 @@ def _should_remove_unsupported_resource_from_datastore(res_dict_or_obj):
 def _remove_unsupported_resource_from_datastore(resource_id):
     """
     Callback to remove unsupported datastore tables.
-    Controlled by config value: ckanext.xloader.limit_datastore_tables.
+    Controlled by config value: ckanext.xloader.clean_datastore_tables.
     Double check the resource format. Only supported Xloader formats should have datastore tables.
     If the resource format is not supported, we should delete the datastore tables.
     """
