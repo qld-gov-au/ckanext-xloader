@@ -1,6 +1,7 @@
 # encoding: utf-8
 
 from __future__ import absolute_import
+from six import text_type as str
 import datetime
 import json
 import logging

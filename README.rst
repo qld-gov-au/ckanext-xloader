@@ -182,6 +182,11 @@ Configuration:
 See the extension's `config_declaration.yaml <ckanext/xloader/config_declaration.yaml>`_ file.
 
 
+    # Enqueue jobs to remove Datastore tables from Resources that have a format
+    # that is not in ckanext.xloader.formats after a Resource is updated.
+    # Default to False.
+    ckanext.xloader.clean_datastore_tables = False
+
 ------------------------
 Developer installation
 ------------------------
