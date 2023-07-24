@@ -90,7 +90,7 @@ class xloaderPlugin(plugins.SingletonPlugin):
 
         # disable automatic submission of resource to xloader
         # if validation is enabled or the url has not changed (canada fork only)
-        if 'validation' in config.get('ckan.plugins') \
+        if 'validation' in toolkit.config.get('ckan.plugins') \
         or not getattr(entity, 'url_changed', False):
             return
 
