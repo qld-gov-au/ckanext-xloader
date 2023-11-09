@@ -429,6 +429,9 @@ def callback_xloader_hook(result_url, api_key, job_dict):
             header, key = 'Authorization', api_key
         headers[header] = key
 
+    log = logging.getLogger(__name__)
+    log.info("Sending data to xloader hook callback at: %s", result_url)
+
     try:
         result = requests.post(
             result_url,
@@ -436,6 +439,7 @@ def callback_xloader_hook(result_url, api_key, job_dict):
             verify=SSL_VERIFY,
             headers=headers)
     except requests.ConnectionError:
+        log.warning("Failed to call xloader hook callback at: %s", result_url)
         return False
 
     return result.status_code == requests.codes.ok
