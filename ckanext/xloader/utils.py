@@ -90,9 +90,9 @@ def get_xloader_user_apitoken():
 
     xloader downloads files and the API key is needed for private resources.
     """
-    user = p.toolkit.config.get('ckanext.xloader.user', None)
-    if user and user.get('apikey'):
-        return user.get('apikey')
+    token = p.toolkit.config.get('ckanext.xloader.api_token', None)
+    if token:
+        return token
 
     user = p.toolkit.get_action('get_site_user')({'ignore_auth': True}, {})
     return user["apikey"]
@@ -107,7 +107,7 @@ def get_xloader_user_context():
     """
     user = p.toolkit.config.get('ckanext.xloader.user', None)
     if user:
-        return {"user": user['name']}
+        return {"user": user}
 
     user = p.toolkit.get_action('get_site_user')({'ignore_auth': True}, {})
     return {"user": user['name']}
