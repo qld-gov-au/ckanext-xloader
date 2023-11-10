@@ -134,16 +134,8 @@ def xloader_submit(context, data_dict):
         task
     )
 
-    callback_url = p.toolkit.url_for(
-        "api.action",
-        ver=3,
-        logic_function="xloader_hook",
-        qualified=True
-    )
     data = {
-        'api_key': utils.get_xloader_user_apitoken(),
         'job_type': 'xloader_to_datastore',
-        'result_url': callback_url,
         'metadata': {
             'ignore_hash': data_dict.get('ignore_hash', False),
             'ckan_url': config['ckan.site_url'],
@@ -220,8 +212,6 @@ def xloader_hook(context, data_dict):
         :type sent_data: json encodable data
         :param job_id: An identifier for the job
         :type job_id: string
-        :param result_url: Callback url
-        :type result_url: url string
         :param data: Results from job.
         :type data: json encodable data
         :param requested_timestamp: Time the job started
