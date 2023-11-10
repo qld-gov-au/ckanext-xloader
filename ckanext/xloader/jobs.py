@@ -45,6 +45,20 @@ DOWNLOAD_TIMEOUT = 30
 #     }
 # }
 
+def _get_logger(database_logging=True, job_id=None):
+    logger = logging.getLogger('%s.%s' % (__name__, job_id)
+                               if job_id else __name__)
+
+    if database_logging:
+        # Set-up logging to the db
+        db_handler = StoringHandler(job_id, input)
+        db_handler.setLevel(logging.DEBUG)
+        db_handler.setFormatter(logging.Formatter('%(message)s'))
+        logger.addHandler(db_handler)
+
+    return logger
+
+
 def xloader_data_into_datastore(input):
     '''This is the func that is queued. It is a wrapper for
     xloader_data_into_datastore_, and makes sure it finishes by calling
@@ -59,7 +73,10 @@ def xloader_data_into_datastore(input):
     # be a duplicate or not
     job_dict = dict(metadata=input['metadata'],
                     status='running')
-    callback_xloader_hook(job_dict=job_dict)
+
+    logger = _get_logger(database_logging=False)
+
+    callback_xloader_hook(job_dict=job_dict, logger=logger)
 
     job_id = get_current_job().id
     errored = False
@@ -71,20 +88,18 @@ def xloader_data_into_datastore(input):
         db.mark_job_as_errored(job_id, str(e))
         job_dict['status'] = 'error'
         job_dict['error'] = str(e)
-        log = logging.getLogger(__name__)
-        log.error('xloader error: {0}, {1}'.format(e, traceback.format_exc()))
+        logger.error('xloader error: {0}, {1}'.format(e, traceback.format_exc()))
         errored = True
     except Exception as e:
         db.mark_job_as_errored(
             job_id, traceback.format_tb(sys.exc_info()[2])[-1] + repr(e))
         job_dict['status'] = 'error'
         job_dict['error'] = str(e)
-        log = logging.getLogger(__name__)
-        log.error('xloader error: {0}, {1}'.format(e, traceback.format_exc()))
+        logger.error('xloader error: {0}, {1}'.format(e, traceback.format_exc()))
         errored = True
     finally:
         # job_dict is defined in xloader_hook's docstring
-        is_saved_ok = callback_xloader_hook(job_dict=job_dict)
+        is_saved_ok = callback_xloader_hook(job_dict=job_dict, logger=logger)
         errored = errored or not is_saved_ok
     return 'error' if errored else None
 
@@ -107,23 +122,7 @@ def xloader_data_into_datastore_(input, job_dict):
     except sa.exc.IntegrityError:
         raise JobError('job_id {} already exists'.format(job_id))
 
-    # Set-up logging to the db
-    handler = StoringHandler(job_id, input)
-    level = logging.DEBUG
-    handler.setLevel(level)
-    logger = logging.getLogger(job_id)
-    handler.setFormatter(logging.Formatter('%(message)s'))
-    logger.addHandler(handler)
-    # also show logs on stderr
-    logger.addHandler(logging.StreamHandler())
-    logger.setLevel(logging.DEBUG)
-    # also log to file
-    if config.get('ckanext.xloader.jobs_log'):
-        file_handler = logging.FileHandler(config.get('ckanext.xloader.jobs_log'))
-        file_handler.setLevel(logging.DEBUG)
-        file_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)-5.5s [%(name)s] %(message)s'))
-        logger.addHandler(file_handler)
-
+    logger = _get_logger(job_id=job_id)
 
     validate_input(input)
 
@@ -167,7 +166,7 @@ def xloader_data_into_datastore_(input, job_dict):
             resource_id=resource['id'], logger=logger)
         set_datastore_active(data, resource, logger)
         job_dict['status'] = 'running_but_viewable'
-        callback_xloader_hook(job_dict=job_dict)
+        callback_xloader_hook(job_dict=job_dict, logger=logger)
         logger.info('Data now available to users: %s', resource_ckan_url)
         loader.create_column_indexes(
             fields=fields,
@@ -404,7 +403,7 @@ def set_datastore_active(data, resource, logger):
     set_resource_metadata(update_dict=data)
 
 
-def callback_xloader_hook(job_dict):
+def callback_xloader_hook(job_dict, logger):
     '''Tells CKAN about the result of the xloader (i.e. calls the action
     function 'xloader_hook'). Usually called by the xloader queue job.
 
@@ -413,8 +412,7 @@ def callback_xloader_hook(job_dict):
     try:
         get_action('xloader_hook')(get_xloader_user_context(), job_dict)
     except Exception as e:
-        log = logging.getLogger(__name__)
-        log.warning("Failed to call xloader_hook action: %s", e)
+        logger.warning("Failed to call xloader_hook action: %s", e)
         return False
 
     return True
