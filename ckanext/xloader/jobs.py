@@ -16,11 +16,12 @@ from rq import get_current_job
 import sqlalchemy as sa
 
 from ckan.plugins.toolkit import get_action, asbool, ObjectNotFound, config
+from ckan.lib.uploader import get_resource_uploader
 
 from . import loader
 from . import db
 from .job_exceptions import JobError, HTTPError, DataTooBigError, FileCouldNotBeLoadedError
-from .utils import set_resource_metadata, get_xloader_user_context, get_xloader_user_apitoken
+from .utils import set_resource_metadata, get_xloader_user_context
 
 
 SSL_VERIFY = asbool(config.get('ckanext.xloader.ssl_verify', True))
@@ -251,11 +252,10 @@ def _download_resource_data(resource, data, logger):
     if resource.get('url_type') != 'upload' and domain != site_url:
         raise JobError('Only uploaded files can be added to the Data Store.')
 
-    # get url from cloudstorage
-    filename = url_parts.path.split('/')[-1]
-    from ckanext.cloudstorage.storage import ResourceCloudStorage
-    storage = ResourceCloudStorage(resource)
-    url = storage.get_url_from_filename(resource['id'], filename)
+    # get url from uploader (canada fork only)
+    upload = get_resource_uploader(resource)
+    url = upload.get_path(resource['id'], context=get_xloader_user_context())
+    logger.info('Resource %s using uploader: %s', resource['id'], type(upload).__name__)
 
     # check scheme
     url_parts = urlsplit(url)
@@ -274,10 +274,6 @@ def _download_resource_data(resource, data, logger):
     try:
         headers = {}
         if resource.get('url_type') == 'upload':
-            # If this is an uploaded file to CKAN, authenticate the request,
-            # otherwise we won't get file from private resources
-            headers['X-CKAN-API-Key'] = get_xloader_user_apitoken()
-
             # Add a constantly changing parameter to bypass URL caching.
             # If we're running XLoader, then either the resource has
             # changed, or something went wrong and we want a clean start.

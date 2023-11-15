@@ -84,20 +84,6 @@ def resource_data(id, resource_id):
     )
 
 
-def get_xloader_user_apitoken():
-    # type: () -> str
-    """ Returns the API Token for authentication.
-
-    xloader downloads files and the API key is needed for private resources.
-    """
-    token = p.toolkit.config.get('ckanext.xloader.api_token', None)
-    if token:
-        return token
-
-    user = p.toolkit.get_action('get_site_user')({'ignore_auth': True}, {})
-    return user["apikey"]
-
-
 def get_xloader_user_context():
     # type: () -> Context|dict
     """ Returns the Xloader user.

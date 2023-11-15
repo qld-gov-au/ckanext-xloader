@@ -15,10 +15,6 @@ groups:
         description: |
             The username of that will be executing the actions of the xloader service.
             This user should have higher permissions.
-      - key: ckanext.xloader.api_token
-        example: eyJ0eXAiOiJKV1QiLCJh.eyJqdGkiOiJ0M2VNUFlQWFg0VU.8QgV8em4RA
-        description: |
-            Uses a specific API token for the downloading private resources.
         required: false
       - key: ckanext.xloader.formats
         example: csv application/csv xls application/vnd.ms-excel
