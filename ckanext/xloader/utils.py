@@ -84,19 +84,19 @@ def resource_data(id, resource_id):
     )
 
 
-def get_xloader_user_apitoken():
-    """ Returns the API Token for authentication.
+def get_xloader_user_context():
+    # type: () -> Context|dict
+    """ Returns the Xloader user.
 
     xloader actions require an authenticated user to perform the actions. This
-    method returns the api_token set in the config file and defaults to the
-    site_user.
+    method returns the context for actions.
     """
-    api_token = p.toolkit.config.get('ckanext.xloader.api_token', None)
-    if api_token:
-        return api_token
+    user = p.toolkit.config.get('ckanext.xloader.user', None)
+    if user:
+        return {"user": user}
 
-    site_user = p.toolkit.get_action('get_site_user')({'ignore_auth': True}, {})
-    return site_user["apikey"]
+    user = p.toolkit.get_action('get_site_user')({'ignore_auth': True}, {})
+    return {"user": user['name']}
 
 
 def set_resource_metadata(update_dict):

@@ -15,18 +15,14 @@ import requests
 from rq import get_current_job
 import sqlalchemy as sa
 
-from ckan import model
-from ckan.plugins.toolkit import get_action, asbool, ObjectNotFound, config, check_ckan_version
+from ckan.plugins.toolkit import get_action, asbool, ObjectNotFound, config
+from ckan.lib.uploader import get_resource_uploader
 
 from . import loader
 from . import db
 from .job_exceptions import JobError, HTTPError, DataTooBigError, FileCouldNotBeLoadedError
-from .utils import set_resource_metadata
+from .utils import set_resource_metadata, get_xloader_user_context
 
-try:
-    from ckan.lib.api_token import get_user_from_token
-except ImportError:
-    get_user_from_token = None
 
 SSL_VERIFY = asbool(config.get('ckanext.xloader.ssl_verify', True))
 if not SSL_VERIFY:
@@ -39,9 +35,7 @@ DOWNLOAD_TIMEOUT = 30
 
 
 # input = {
-# 'api_key': user['apikey'],
 # 'job_type': 'xloader_to_datastore',
-# 'result_url': callback_url,
 # 'metadata': {
 #     'ignore_hash': data_dict.get('ignore_hash', False),
 #     'ckan_url': site_url,
@@ -51,6 +45,20 @@ DOWNLOAD_TIMEOUT = 30
 #     'original_url': resource_dict.get('url'),
 #     }
 # }
+
+def _get_logger(database_logging=True, job_id=None):
+    logger = logging.getLogger('%s.%s' % (__name__, job_id)
+                               if job_id else __name__)
+
+    if database_logging:
+        # Set-up logging to the db
+        db_handler = StoringHandler(job_id, input)
+        db_handler.setLevel(logging.DEBUG)
+        db_handler.setFormatter(logging.Formatter('%(message)s'))
+        logger.addHandler(db_handler)
+
+    return logger
+
 
 def xloader_data_into_datastore(input):
     '''This is the func that is queued. It is a wrapper for
@@ -66,9 +74,10 @@ def xloader_data_into_datastore(input):
     # be a duplicate or not
     job_dict = dict(metadata=input['metadata'],
                     status='running')
-    callback_xloader_hook(result_url=input['result_url'],
-                          api_key=input['api_key'],
-                          job_dict=job_dict)
+
+    logger = _get_logger(database_logging=False)
+
+    callback_xloader_hook(job_dict=job_dict, logger=logger)
 
     job_id = get_current_job().id
     errored = False
@@ -80,22 +89,18 @@ def xloader_data_into_datastore(input):
         db.mark_job_as_errored(job_id, str(e))
         job_dict['status'] = 'error'
         job_dict['error'] = str(e)
-        log = logging.getLogger(__name__)
-        log.error('xloader error: {0}, {1}'.format(e, traceback.format_exc()))
+        logger.error('xloader error: {0}, {1}'.format(e, traceback.format_exc()))
         errored = True
     except Exception as e:
         db.mark_job_as_errored(
             job_id, traceback.format_tb(sys.exc_info()[2])[-1] + repr(e))
         job_dict['status'] = 'error'
         job_dict['error'] = str(e)
-        log = logging.getLogger(__name__)
-        log.error('xloader error: {0}, {1}'.format(e, traceback.format_exc()))
+        logger.error('xloader error: {0}, {1}'.format(e, traceback.format_exc()))
         errored = True
     finally:
         # job_dict is defined in xloader_hook's docstring
-        is_saved_ok = callback_xloader_hook(result_url=input['result_url'],
-                                            api_key=input['api_key'],
-                                            job_dict=job_dict)
+        is_saved_ok = callback_xloader_hook(job_dict=job_dict, logger=logger)
         errored = errored or not is_saved_ok
     return 'error' if errored else None
 
@@ -118,29 +123,19 @@ def xloader_data_into_datastore_(input, job_dict):
     except sa.exc.IntegrityError:
         raise JobError('job_id {} already exists'.format(job_id))
 
-    # Set-up logging to the db
-    handler = StoringHandler(job_id, input)
-    level = logging.DEBUG
-    handler.setLevel(level)
-    logger = logging.getLogger(job_id)
-    handler.setFormatter(logging.Formatter('%(message)s'))
-    logger.addHandler(handler)
-    # also show logs on stderr
-    logger.addHandler(logging.StreamHandler())
-    logger.setLevel(logging.DEBUG)
+    logger = _get_logger(job_id=job_id)
 
     validate_input(input)
 
     data = input['metadata']
 
     resource_id = data['resource_id']
-    api_key = input.get('api_key')
     try:
-        resource, dataset = get_resource_and_dataset(resource_id, api_key)
+        resource, dataset = get_resource_and_dataset(resource_id)
     except (JobError, ObjectNotFound):
         # try again in 5 seconds just in case CKAN is slow at adding resource
         time.sleep(5)
-        resource, dataset = get_resource_and_dataset(resource_id, api_key)
+        resource, dataset = get_resource_and_dataset(resource_id)
     resource_ckan_url = '/dataset/{}/resource/{}' \
         .format(dataset['name'], resource['id'])
     logger.info('Express Load starting: %s', resource_ckan_url)
@@ -152,8 +147,7 @@ def xloader_data_into_datastore_(input, job_dict):
         return
 
     # download resource
-    tmp_file, file_hash = _download_resource_data(resource, data, api_key,
-                                                  logger)
+    tmp_file, file_hash = _download_resource_data(resource, data, logger)
 
     if (resource.get('hash') == file_hash
             and not data.get('ignore_hash')):
@@ -173,9 +167,7 @@ def xloader_data_into_datastore_(input, job_dict):
             resource_id=resource['id'], logger=logger)
         set_datastore_active(data, resource, logger)
         job_dict['status'] = 'running_but_viewable'
-        callback_xloader_hook(result_url=input['result_url'],
-                              api_key=api_key,
-                              job_dict=job_dict)
+        callback_xloader_hook(job_dict=job_dict, logger=logger)
         logger.info('Data now available to users: %s', resource_ckan_url)
         loader.create_column_indexes(
             fields=fields,
@@ -238,12 +230,11 @@ def xloader_data_into_datastore_(input, job_dict):
     logger.info('Express Load completed')
 
 
-def _download_resource_data(resource, data, api_key, logger):
+def _download_resource_data(resource, data, logger):
     '''Downloads the resource['url'] as a tempfile.
 
     :param resource: resource (i.e. metadata) dict (from the job dict)
     :param data: job dict - may be written to during this function
-    :param api_key: CKAN api key - needed to obtain resources that are private
     :param logger:
 
     If the download is bigger than MAX_CONTENT_LENGTH then it just downloads a
@@ -261,11 +252,11 @@ def _download_resource_data(resource, data, api_key, logger):
     if resource.get('url_type') != 'upload' and domain != site_url:
         raise JobError('Only uploaded files can be added to the Data Store.')
 
-    # get url from cloudstorage
-    filename = url_parts.path.split('/')[-1]
-    from ckanext.cloudstorage.storage import ResourceCloudStorage
-    storage = ResourceCloudStorage(resource)
-    url = storage.get_url_from_filename(resource['id'], filename)
+    # get url from uploader (canada fork only)
+    #TODO: upstream contribution??
+    upload = get_resource_uploader(resource)
+    url = upload.get_path(resource['id'])
+    logger.info('Resource %s using uploader: %s', resource['id'], type(upload).__name__)
 
     # check scheme
     url_parts = urlsplit(url)
@@ -284,10 +275,6 @@ def _download_resource_data(resource, data, api_key, logger):
     try:
         headers = {}
         if resource.get('url_type') == 'upload':
-            # If this is an uploaded file to CKAN, authenticate the request,
-            # otherwise we won't get file from private resources
-            headers['X-CKAN-API-Key'] = api_key
-
             # Add a constantly changing parameter to bypass URL caching.
             # If we're running XLoader, then either the resource has
             # changed, or something went wrong and we want a clean start.
@@ -413,36 +400,19 @@ def set_datastore_active(data, resource, logger):
     set_resource_metadata(update_dict=data)
 
 
-def callback_xloader_hook(result_url, api_key, job_dict):
-    '''Tells CKAN about the result of the xloader (i.e. calls the callback
+def callback_xloader_hook(job_dict, logger):
+    '''Tells CKAN about the result of the xloader (i.e. calls the action
     function 'xloader_hook'). Usually called by the xloader queue job.
-    Returns whether it managed to call the sh
+
+    Returns whether it managed to call the xloader_hook action or not
     '''
-    api_key_from_job = job_dict.pop('api_key', None)
-    if not api_key:
-        api_key = api_key_from_job
-    headers = {'Content-Type': 'application/json'}
-    if api_key:
-        if ':' in api_key:
-            header, key = api_key.split(':')
-        else:
-            header, key = 'Authorization', api_key
-        headers[header] = key
-
-    log = logging.getLogger(__name__)
-    log.info("Sending data to xloader hook callback at: %s", result_url)
-
     try:
-        result = requests.post(
-            result_url,
-            data=json.dumps(job_dict, cls=DatetimeJsonEncoder),
-            verify=SSL_VERIFY,
-            headers=headers)
-    except requests.ConnectionError:
-        log.warning("Failed to call xloader hook callback at: %s", result_url)
+        get_action('xloader_hook')(get_xloader_user_context(), job_dict)
+    except Exception as e:
+        logger.warning("Failed to call xloader_hook action: %s", e)
         return False
 
-    return result.status_code == requests.codes.ok
+    return True
 
 
 def validate_input(input):
@@ -456,8 +426,6 @@ def validate_input(input):
         raise JobError('No id provided.')
     if 'ckan_url' not in data:
         raise JobError('No ckan_url provided.')
-    if not input.get('api_key'):
-        raise JobError('No CKAN API key provided')
 
 
 def update_resource(resource, patch_only=False):
@@ -467,55 +435,20 @@ def update_resource(resource, patch_only=False):
     or patch the given CKAN resource for file hash
     """
     action = 'resource_update' if not patch_only else 'resource_patch'
-    user = get_action('get_site_user')({'ignore_auth': True}, {})
-    context = {
-        'ignore_auth': True,
-        'user': user['name'],
-        'auth_user_obj': None
-    }
+    context = get_xloader_user_context()
+    context['ignore_auth'] = True
+    context['auth_user_obj'] = None
     get_action(action)(context, resource)
 
 
-def _get_user_from_key(api_key_or_token):
-    """ Gets the user using the API Token or API Key.
-
-    This method provides backwards compatibility for CKAN 2.9 that
-    supported both methods and previous CKAN versions supporting
-    only API Keys.
-    """
-    user = None
-    if get_user_from_token:
-        user = get_user_from_token(api_key_or_token)
-    if not user:
-        user = model.Session.query(model.User).filter_by(
-            apikey=api_key_or_token
-        ).first()
-    return user
-
-
-def get_resource_and_dataset(resource_id, api_key):
+def get_resource_and_dataset(resource_id):
     """
     Gets available information about the resource and its dataset from CKAN
     """
-    context = None
-    user = _get_user_from_key(api_key)
-    if user is not None:
-        context = {'user': user.name}
-
+    context = get_xloader_user_context()
     res_dict = get_action('resource_show')(context, {'id': resource_id})
     pkg_dict = get_action('package_show')(context, {'id': res_dict['package_id']})
     return res_dict, pkg_dict
-
-
-def get_url(action, ckan_url):
-    """
-    Get url for ckan action
-    """
-    if not urlsplit(ckan_url).scheme:
-        ckan_url = 'http://' + ckan_url.lstrip('/')
-    ckan_url = ckan_url.rstrip('/')
-    return '{ckan_url}/api/3/action/{action}'.format(
-        ckan_url=ckan_url, action=action)
 
 
 def check_response(response, request_url, who, good_status=(201, 200),

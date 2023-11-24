@@ -93,14 +93,6 @@ def get_job(job_id):
         This may be any JSON-serializable type, e.g. None, a string, a dict,
         etc.
 
-    "result_url": The callback URL that CKAN Service Provider will post the
-        result to when the job finishes (unicode)
-
-    "api_key": The API key that CKAN Service Provider will use when posting
-        the job result to the result_url (unicode or None). A None here doesn't
-        mean that there was no API key: CKAN Service Provider deletes the API
-        key from the database after it has posted the result to the result_url.
-
     "metadata": Any custom metadata associated with the job (dict)
 
     "logs": Any logs associated with the job (list)
@@ -136,8 +128,8 @@ def get_job(job_id):
     return result_dict
 
 
-def add_pending_job(job_id, job_type, api_key,
-                    data=None, metadata=None, result_url=None):
+def add_pending_job(job_id, job_type,
+                    data=None, metadata=None):
     """Add a new job with status "pending" to the jobs table.
 
     All code that adds jobs to the jobs table should go through this function.
@@ -155,10 +147,6 @@ def add_pending_job(job_id, job_type, api_key,
         this job
     :type job_type: unicode
 
-    :param api_key: the client site API key that ckanserviceprovider will use
-        when posting the job result to the result_url
-    :type api_key: unicode
-
     :param data: The input data for the job (called sent_data elsewhere)
     :type data: Any JSON-serializable type
 
@@ -166,10 +154,6 @@ def add_pending_job(job_id, job_type, api_key,
         stored along with the job. The keys should be strings, the values can
         be strings or any JSON-encodable type.
     :type metadata: dict
-
-    :param result_url: the callback URL that ckanserviceprovider will post the
-        job result to when the job has finished
-    :type result_url: unicode
 
     """
     if not data:
@@ -182,10 +166,6 @@ def add_pending_job(job_id, job_type, api_key,
         job_id = six.text_type(job_id)
     if job_type:
         job_type = six.text_type(job_type)
-    if result_url:
-        result_url = six.text_type(result_url)
-    if api_key:
-        api_key = six.text_type(api_key)
     data = six.text_type(data)
 
     if not metadata:
@@ -199,9 +179,7 @@ def add_pending_job(job_id, job_type, api_key,
             job_type=job_type,
             status='pending',
             requested_timestamp=datetime.datetime.utcnow(),
-            sent_data=data,
-            result_url=result_url,
-            api_key=api_key))
+            sent_data=data,))
 
         # Insert any (key, value) metadata pairs that the job has into the
         # metadata table.
@@ -378,20 +356,9 @@ def mark_job_as_failed_to_post_result(job_id):
     """
     update_dict = {
         "error":
-            "Process completed but unable to post to result_url",
+            "Process completed but unable to call xloader_hook action",
     }
     _update_job(job_id, update_dict)
-
-
-def delete_api_key(job_id):
-    """Delete the given job's API key from the database.
-
-    The API key is used when posting the job's result to the client's callback
-    URL. This function should be called to delete the API key after the result
-    has been posted - the API key is no longer needed.
-
-    """
-    _update_job(job_id, {"api_key": None})
 
 
 def _init_jobs_table():
@@ -406,10 +373,6 @@ def _init_jobs_table():
         sqlalchemy.Column('requested_timestamp', sqlalchemy.DateTime),
         sqlalchemy.Column('finished_timestamp', sqlalchemy.DateTime),
         sqlalchemy.Column('sent_data', sqlalchemy.UnicodeText),
-        # Callback URL:
-        sqlalchemy.Column('result_url', sqlalchemy.UnicodeText),
-        # CKAN API key:
-        sqlalchemy.Column('api_key', sqlalchemy.UnicodeText),
     )
     return _jobs_table
 
