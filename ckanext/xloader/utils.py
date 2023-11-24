@@ -175,10 +175,10 @@ def type_guess(rows, types=TYPES, strict=False):
             for ci, cell in enumerate(row):
                 if not cell:
                     continue
-                at_least_one_value[ci] = True
                 for type in list(guesses[ci].keys()):
                     if not isinstance(cell, type):
                         guesses[ci].pop(type)
+                at_least_one_value[ci] = True if guesses[ci] else False
         # no need to set guessing weights before this
         # because we only accept a type if it never fails
         for i, guess in enumerate(guesses):
@@ -212,3 +212,13 @@ def type_guess(rows, types=TYPES, strict=False):
         guesses_tuples = [(t, guess[t]) for t in types if t in guess]
         _columns.append(max(guesses_tuples, key=lambda t_n: t_n[1])[0])
     return _columns
+
+
+def datastore_resource_exists(resource_id):
+    context = {'model': model, 'ignore_auth': True}
+    try:
+        response = p.toolkit.get_action('datastore_search')(context, dict(
+            id=resource_id, limit=0))
+    except p.toolkit.ObjectNotFound:
+        return False
+    return response or {'fields': []}
