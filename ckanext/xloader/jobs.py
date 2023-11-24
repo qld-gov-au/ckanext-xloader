@@ -253,8 +253,9 @@ def _download_resource_data(resource, data, logger):
         raise JobError('Only uploaded files can be added to the Data Store.')
 
     # get url from uploader (canada fork only)
+    #TODO: upstream contribution??
     upload = get_resource_uploader(resource)
-    url = upload.get_path(resource['id'], context=get_xloader_user_context())
+    url = upload.get_path(resource['id'])
     logger.info('Resource %s using uploader: %s', resource['id'], type(upload).__name__)
 
     # check scheme
