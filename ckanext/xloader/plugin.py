@@ -264,6 +264,10 @@ def _remove_unsupported_resource_from_datastore(resource_id):
 
 
 def _is_validation_plugin_loaded():
+    """
+    Checks the existance of a logic action from the ckanext-validation
+    plugin, thus supporting any extending of the Validation Plugin class.
+    """
     try:
         toolkit.get_action('resource_validation_show')
     except KeyError:
