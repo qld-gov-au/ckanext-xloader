@@ -86,7 +86,7 @@ class xloaderPlugin(plugins.SingletonPlugin):
         # extension will call resource_patch and this method should
         # be called again. However, url_changed will not be in the entity
         # once Validation does the patch.
-        if 'validation' in toolkit.config.get('ckan.plugins', []) and \
+        if _is_validation_plugin_loaded() and \
         toolkit.asbool(toolkit.config.get('ckanext.xloader.requires_validation')):
             if entity.__dict__.get('extras', {}).get('validation_status', None) != 'success':
                 log.debug("Skipping xloading resource %s because "
@@ -117,7 +117,7 @@ class xloaderPlugin(plugins.SingletonPlugin):
     # IResourceController
 
     def after_resource_create(self, context, resource_dict):
-        if 'validation' in toolkit.config.get('ckan.plugins', []) and \
+        if _is_validation_plugin_loaded() and \
         toolkit.asbool(toolkit.config.get('ckanext.xloader.requires_validation')) and \
         resource_dict.get('validation_status', None) != 'success':
             log.debug("Skipping xloading resource %s because "
@@ -261,3 +261,11 @@ def _remove_unsupported_resource_from_datastore(resource_id):
             log.info('Datastore table dropped for resource %s', res['id'])
         except toolkit.ObjectNotFound:
             log.error('Datastore table for resource %s does not exist', res['id'])
+
+
+def _is_validation_plugin_loaded():
+    try:
+        toolkit.get_action('resource_validation_show')
+    except KeyError:
+        return False
+    return True
