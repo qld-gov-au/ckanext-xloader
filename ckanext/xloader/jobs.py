@@ -350,8 +350,15 @@ def _download_resource_data(resource, data, logger):
 
     logger.info('Downloaded ok - %s', printable_file_size(length))
     file_hash = m.hexdigest()
+    # remove NULL bytes from the data (canada fork only)
+    # TODO: upstream contribution??
     tmp_file.seek(0)
-    return tmp_file, file_hash
+    tmp_data = tmp_file.read()
+    tmp_file.close()
+    parsed_tmp_file = get_tmp_file(url)
+    parsed_tmp_file.write(tmp_data.replace('\0', '').replace('\x00', ''))
+    parsed_tmp_file.seek(0)
+    return parsed_tmp_file, file_hash
 
 
 def get_response(url, headers):
