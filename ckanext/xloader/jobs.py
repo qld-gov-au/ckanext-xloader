@@ -356,7 +356,7 @@ def _download_resource_data(resource, data, logger):
     tmp_data = tmp_file.read()
     tmp_file.close()
     parsed_tmp_file = get_tmp_file(url)
-    parsed_tmp_file.write(tmp_data.replace('\x00', ''))
+    parsed_tmp_file.write(tmp_data.replace('\x00', '').replace('\0', ''))
     parsed_tmp_file.seek(0)
     return parsed_tmp_file, file_hash
 
