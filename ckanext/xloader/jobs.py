@@ -141,7 +141,8 @@ def xloader_data_into_datastore_(input, job_dict):
     logger.info('Express Load starting: %s', resource_ckan_url)
 
     # check if the resource url_type is a datastore
-    if resource.get('url_type') == 'datastore':
+    accept_types = ['upload', '', None]
+    if resource.get('url_type') not in accept_types:
         logger.info('Ignoring resource - url_type=datastore - dump files are '
                     'managed with the Datastore API')
         return
