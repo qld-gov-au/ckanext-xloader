@@ -16,13 +16,15 @@
     </form>
   {% endblock %}
 
+  <div class="clearfix"></div>
+
   {% if status.error and status.error.message %}
     {% set show_table = false %}
-    <div class="alert alert-error">
+    <div class="alert alert-danger mrgn-top-md">
       <strong>{{ _('Upload error:') }}</strong> {{ status.error.message }}
     </div>
   {% elif status.task_info and status.task_info.error %}
-    <div class="alert alert-error">
+    <div class="alert alert-danger mrgn-top-md">
       {% if status.task_info.error is mapping %}
         <strong>{{ _('Error:') }}</strong> {{ status.task_info.error.message }}
         {% for error_key, error_value in status.task_info.error.items() %}
