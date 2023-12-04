@@ -218,6 +218,12 @@ def xloader_data_into_datastore_(input, job_dict):
                     just_load_with_direct_load))
                 if just_load_with_direct_load:
                     logger.info('Skipping messytables loading')
+                    # at this point, the loading has fully failed. Re-raising the error
+                    # so it is caught by this method's wrapper:
+                    #       xloader_data_into_datastore
+                    # (canada fork only)
+                    # TODO: upstream contribution??
+                    raise JobError(e)
                 else:
                     logger.info('Trying again with tabulator')
                     tabulator_load()
@@ -357,7 +363,8 @@ def _download_resource_data(resource, data, logger):
     tmp_data = tmp_file.read()
     tmp_file.close()
     parsed_tmp_file = get_tmp_file(url)
-    parsed_tmp_file.write(tmp_data.replace('\x00', '').replace('\0', ''))
+    # removes white space at end as well (canad fork only)
+    parsed_tmp_file.write(tmp_data.replace('\x00', '').replace('\0', '').rstrip())
     parsed_tmp_file.seek(0)
     return parsed_tmp_file, file_hash
 
