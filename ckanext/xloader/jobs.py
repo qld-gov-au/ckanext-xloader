@@ -453,6 +453,10 @@ def update_resource(resource, patch_only=False):
     context = get_xloader_user_context()
     context['ignore_auth'] = True
     context['auth_user_obj'] = None
+    # (canada fork only) if Xloader is running, the Resource has
+    # already passed validation and does not need it again.
+    # TODO: remove after upstream fix to IResourceController hooks
+    context['_validation_performed'] = True
     get_action(action)(context, resource)
 
 
