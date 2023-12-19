@@ -364,7 +364,7 @@ def _download_resource_data(resource, data, logger):
     tmp_file.close()
     parsed_tmp_file = get_tmp_file(url)
     # removes white space at end as well (canad fork only)
-    parsed_tmp_file.write(tmp_data.replace('\x00', '').replace('\0', '').rstrip())
+    parsed_tmp_file.write(tmp_data.replace(b'\x00', b'').replace(b'\0', b'').rstrip())
     parsed_tmp_file.seek(0)
     return parsed_tmp_file, file_hash
 
