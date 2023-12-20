@@ -207,7 +207,12 @@ def type_guess(rows, types=TYPES, strict=False):
                     continue
                 at_least_one_value[ci] = True
                 for type in list(guesses[ci].keys()):
+                    # (canada fork only): NoneType support
+                    if type is None:
+                        type = None.__class__
                     if not isinstance(cell, type):
+                        if type is None.__class__:
+                            type = None  # switch back to None so pop is successful
                         guesses[ci].pop(type)
         # no need to set guessing weights before this
         # because we only accept a type if it never fails

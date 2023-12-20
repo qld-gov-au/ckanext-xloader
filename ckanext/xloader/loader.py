@@ -301,6 +301,12 @@ def load_table(table_filepath, resource_id, mimetype='text/csv', logger=None):
                 res_id=resource_id))
             delete_datastore_resource(resource_id)
 
+        # (canada fork only): extra logging to show column types in reports
+        for field in zip(headers, types):
+            logger.info("Column '%s' type set to: %s",
+                        field[0],
+                        TYPE_MAPPING[str(field[1])])
+
         headers_dicts = [dict(id=field[0], type=TYPE_MAPPING[str(field[1])])
                          for field in zip(headers, types)]
 
@@ -338,17 +344,20 @@ _TYPE_MAPPING = {
     "<type 'bool'>": 'text',
     "<type 'int'>": 'numeric',
     "<type 'float'>": 'numeric',
+    "<type 'NoneType'>": 'text',  # (canada fork only): NoneType support, py2 support
+    "<type 'datetime.datetime'>": 'timestamp',  # (canada fork only): py2 support
     "<class 'decimal.Decimal'>": 'numeric',
     "<class 'str'>": 'text',
     "<class 'bool'>": 'text',
     "<class 'int'>": 'numeric',
     "<class 'float'>": 'numeric',
     "<class 'datetime.datetime'>": 'timestamp',
+    "<class 'NoneType'>": 'text',  # (canada fork only): NoneType support
 }
 
 
 def get_types():
-    _TYPES = [int, bool, str, datetime.datetime, float, Decimal]
+    _TYPES = [int, bool, str, datetime.datetime, float, Decimal, None]  # (canada fork only): NoneType support
     TYPE_MAPPING = config.get('TYPE_MAPPING', _TYPE_MAPPING)
     return _TYPES, TYPE_MAPPING
 
