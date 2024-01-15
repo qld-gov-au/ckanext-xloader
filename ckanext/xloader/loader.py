@@ -3,7 +3,7 @@ from __future__ import absolute_import
 
 import datetime
 import itertools
-from six import text_type as str
+from six import text_type as str, binary_type
 import os
 import os.path
 import tempfile
@@ -267,7 +267,10 @@ def load_table(table_filepath, resource_id, mimetype='text/csv', logger=None):
     skip_rows = list(range(1, header_offset + 2))
 
     TYPES, TYPE_MAPPING = get_types()
-    types = type_guess(stream.sample[1:], types=TYPES, strict=True)
+    # (canada fork only): add config option for strict guessing
+    # TODO: upstream contribution??
+    strict_guessing = p.toolkit.asbool(config.get('ckanext.xloader.strict_type_guessing', True))
+    types = type_guess(stream.sample[1:], types=TYPES, strict=strict_guessing)
 
     # override with types user requested
     if existing_info:
@@ -300,12 +303,6 @@ def load_table(table_filepath, resource_id, mimetype='text/csv', logger=None):
             logger.info('Deleting "{res_id}" from datastore.'.format(
                 res_id=resource_id))
             delete_datastore_resource(resource_id)
-
-        # (canada fork only): extra logging to show column types in reports
-        for field in zip(headers, types):
-            logger.info("Column '%s' type set to: %s",
-                        field[0],
-                        TYPE_MAPPING[str(field[1])])
 
         headers_dicts = [dict(id=field[0], type=TYPE_MAPPING[str(field[1])])
                          for field in zip(headers, types)]
@@ -340,14 +337,18 @@ def load_table(table_filepath, resource_id, mimetype='text/csv', logger=None):
 
 
 _TYPE_MAPPING = {
+    "<type 'str'>": 'text',  # (canada fork only): Binary support, py2 support
     "<type 'unicode'>": 'text',
+    "<type 'bytes'>": 'text',  # (canada fork only): Binary support, py3 support
     "<type 'bool'>": 'text',
     "<type 'int'>": 'numeric',
     "<type 'float'>": 'numeric',
-    "<type 'NoneType'>": 'text',  # (canada fork only): NoneType support, py2 support
+    "<type 'NoneType'>": 'text',  # (canada fork only): NoneType support
     "<type 'datetime.datetime'>": 'timestamp',  # (canada fork only): py2 support
     "<class 'decimal.Decimal'>": 'numeric',
     "<class 'str'>": 'text',
+    "<class 'unicode'>": 'text',  # (canada fork only): py2 support
+    "<class 'bytes'>": 'text',  # (canada fork only): Binary support, py3 support
     "<class 'bool'>": 'text',
     "<class 'int'>": 'numeric',
     "<class 'float'>": 'numeric',
@@ -357,7 +358,8 @@ _TYPE_MAPPING = {
 
 
 def get_types():
-    _TYPES = [int, bool, str, datetime.datetime, float, Decimal, None]  # (canada fork only): NoneType support
+    # (canada fork only): NoneType support, Binary support
+    _TYPES = [int, bool, str, binary_type, datetime.datetime, float, Decimal, None]
     TYPE_MAPPING = config.get('TYPE_MAPPING', _TYPE_MAPPING)
     return _TYPES, TYPE_MAPPING
 
