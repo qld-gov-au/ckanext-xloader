@@ -343,7 +343,6 @@ _TYPE_MAPPING = {
     "<type 'bool'>": 'text',
     "<type 'int'>": 'numeric',
     "<type 'float'>": 'numeric',
-    "<type 'NoneType'>": 'text',  # (canada fork only): NoneType support
     "<type 'datetime.datetime'>": 'timestamp',  # (canada fork only): py2 support
     "<class 'decimal.Decimal'>": 'numeric',
     "<class 'str'>": 'text',
@@ -353,13 +352,12 @@ _TYPE_MAPPING = {
     "<class 'int'>": 'numeric',
     "<class 'float'>": 'numeric',
     "<class 'datetime.datetime'>": 'timestamp',
-    "<class 'NoneType'>": 'text',  # (canada fork only): NoneType support
 }
 
 
 def get_types():
-    # (canada fork only): NoneType support, Binary support
-    _TYPES = [int, bool, str, binary_type, datetime.datetime, float, Decimal, None]
+    # (canada fork only): Binary support
+    _TYPES = [int, bool, str, binary_type, datetime.datetime, float, Decimal]
     TYPE_MAPPING = config.get('TYPE_MAPPING', _TYPE_MAPPING)
     return _TYPES, TYPE_MAPPING
 

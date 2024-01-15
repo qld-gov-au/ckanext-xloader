@@ -184,8 +184,8 @@ def headers_guess(rows, tolerance=1):
     return 0, []
 
 
-# (canada fork only): NoneType support, Binary support
-TYPES = [int, bool, str, binary_type, datetime.datetime, float, Decimal, None]
+# (canada fork only): Binary support
+TYPES = [int, bool, str, binary_type, datetime.datetime, float, Decimal]
 
 def type_guess(rows, types=TYPES, strict=False):
     """ The type guesser aggregates the number of successful
@@ -212,12 +212,7 @@ def type_guess(rows, types=TYPES, strict=False):
                     continue
                 at_least_one_value[ci] = True
                 for type in list(guesses[ci].keys()):
-                    # (canada fork only): NoneType support
-                    if type is None:
-                        type = None.__class__
                     if not isinstance(cell, type):
-                        if type is None.__class__:
-                            type = None  # switch back to None so pop is successful
                         guesses[ci].pop(type)
         # no need to set guessing weights before this
         # because we only accept a type if it never fails
@@ -240,9 +235,6 @@ def type_guess(rows, types=TYPES, strict=False):
                 if not cell:
                     continue
                 for type in types:
-                    # (canada fork only): NoneType support
-                    if type is None:
-                        type = None.__class__
                     if isinstance(cell, type):
                         guesses[i][type] += 1
         _columns = []
