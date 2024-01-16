@@ -86,7 +86,8 @@ class xloaderPlugin(plugins.SingletonPlugin):
             return
 
         if _should_remove_unsupported_resource_from_datastore(entity):
-            toolkit.enqueue_job(fn=_remove_unsupported_resource_from_datastore, args=[entity.id])
+            toolkit.enqueue_job(fn=_remove_unsupported_resource_from_datastore, args=[entity.id],
+                                title="Remove DataStore for Unsupported Format or Type")
 
         # disable automatic submission of resource to xloader
         # if validation is enabled or the url has not changed (canada fork only)
