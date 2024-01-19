@@ -1,5 +1,7 @@
 from flask import Blueprint
 
+from ckan.plugins.toolkit import request
+
 import ckanext.xloader.utils as utils
 
 
@@ -12,4 +14,12 @@ def get_blueprints():
 
 @xloader.route("/dataset/<id>/resource_data/<resource_id>", methods=("GET", "POST"))
 def resource_data(id, resource_id):
-    return utils.resource_data(id, resource_id)
+    rows = request.args.get('rows')
+    if rows:
+        try:
+            rows = int(rows)
+            if rows < 0:
+                rows = None
+        except ValueError:
+            rows = None
+    return utils.resource_data(id, resource_id, rows)
