@@ -386,7 +386,8 @@ def load_table(table_filepath, resource_id, mimetype='text/csv', logger=None):
         non_empty_types = ['timestamp', 'numeric']
         for i, records in enumerate(chunky(result, 250)):
             count += len(records)
-            logger.info('Saving chunk {number}'.format(number=i))
+            # (canada fork only): remove excessive logging
+            #logger.info('Saving chunk {number}'.format(number=i))
             for row in records:
                 for column_index, column_name in enumerate(row):
                     if headers_dicts[column_index]['type'] in non_empty_types and row[column_name] == '':
