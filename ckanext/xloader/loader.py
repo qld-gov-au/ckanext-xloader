@@ -324,7 +324,8 @@ def load_table(table_filepath, resource_id, mimetype='text/csv', logger=None):
         count = 0
         for i, records in enumerate(chunky(result, 250)):
             count += len(records)
-            logger.info('Saving chunk {number}'.format(number=i))
+            # (canada fork only): remove excessive logging
+            #logger.info('Saving chunk {number}'.format(number=i))
             send_resource_to_datastore(resource_id, headers_dicts, records)
         logger.info('...copying done')
 
