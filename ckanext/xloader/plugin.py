@@ -86,10 +86,10 @@ class xloaderPlugin(plugins.SingletonPlugin):
         # extension will call resource_patch and this method should
         # be called again. However, url_changed will not be in the entity
         # once Validation does the patch.
-        if _is_validation_plugin_loaded() and \
-        toolkit.asbool(toolkit.config.get('ckanext.xloader.requires_validation')):
+        if utils.is_validation_plugin_loaded() and \
+          toolkit.asbool(toolkit.config.get('ckanext.xloader.requires_validation')):
             if entity.__dict__.get('extras', {}).get('validation_status', None) != 'success':
-                log.debug("Skipping xloading resource %s because "
+                log.debug("Skipping xloading resource %s because the "
                           "resource did not pass validation yet.", entity.id)
                 return
         elif not getattr(entity, 'url_changed', False):
@@ -109,10 +109,10 @@ class xloaderPlugin(plugins.SingletonPlugin):
     # IResourceController
 
     def after_resource_create(self, context, resource_dict):
-        if _is_validation_plugin_loaded() and \
-        toolkit.asbool(toolkit.config.get('ckanext.xloader.requires_validation')) and \
-        resource_dict.get('validation_status', None) != 'success':
-            log.debug("Skipping xloading resource %s because "
+        if utils.is_validation_plugin_loaded() and \
+          toolkit.asbool(toolkit.config.get('ckanext.xloader.requires_validation')) and \
+          resource_dict.get('validation_status', None) != 'success':
+            log.debug("Skipping xloading resource %s because the "
                       "resource did not pass validation yet.", resource_dict.get('id'))
             return
         self._submit_to_xloader(resource_dict)
@@ -217,15 +217,3 @@ class xloaderPlugin(plugins.SingletonPlugin):
             "xloader_status_description": xloader_helpers.xloader_status_description,
             "is_resource_supported_by_xloader": xloader_helpers.is_resource_supported_by_xloader,
         }
-
-
-def _is_validation_plugin_loaded():
-    """
-    Checks the existance of a logic action from the ckanext-validation
-    plugin, thus supporting any extending of the Validation Plugin class.
-    """
-    try:
-        toolkit.get_action('resource_validation_show')
-    except KeyError:
-        return False
-    return True
