@@ -44,17 +44,17 @@ class XLoaderFormats(object):
 def resource_data(id, resource_id, rows=None):
 
     if p.toolkit.request.method == "POST":
-        context = {
-            "ignore_auth": True,
-        }
-        resource_dict = p.toolkit.get_action("resource_show")(
-            context,
-            {
-                "id": resource_id,
-            },
-        )
         if is_validation_plugin_loaded() and \
           p.toolkit.asbool(p.toolkit.config.get('ckanext.xloader.requires_validation')):
+            context = {
+                "ignore_auth": True,
+            }
+            resource_dict = p.toolkit.get_action("resource_show")(
+                context,
+                {
+                    "id": resource_id,
+                },
+            )
             if resource_dict.get('validation_status', None) != 'success':
                 h.flash_error(_("Cannot upload resource %s to the DataStore "
                                   "because the resource did not pass validation yet.") % resource_id)
