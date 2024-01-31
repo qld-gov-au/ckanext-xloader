@@ -7,6 +7,7 @@ from ckan.plugins import toolkit
 
 from ckan.model.domain_object import DomainObjectOperation
 from ckan.model.resource import Resource
+from ckan.model.package import Package
 
 from . import action, auth, helpers as xloader_helpers, utils
 from ckanext.xloader.utils import XLoaderFormats
@@ -87,11 +88,13 @@ class xloaderPlugin(plugins.SingletonPlugin):
         # be called again. However, url_changed will not be in the entity
         # once Validation does the patch.
         if utils.is_validation_plugin_loaded() and \
-          toolkit.asbool(toolkit.config.get('ckanext.xloader.requires_validation')):
+                toolkit.asbool(toolkit.config.get('ckanext.xloader.requires_validation')):
+
             if entity.__dict__.get('extras', {}).get('validation_status', None) != 'success':
                 log.debug("Skipping xloading resource %s because the "
                           "resource did not pass validation yet.", entity.id)
                 return
+
         elif not getattr(entity, 'url_changed', False):
             return
 
@@ -118,11 +121,13 @@ class xloaderPlugin(plugins.SingletonPlugin):
 
     def after_resource_create(self, context, resource_dict):
         if utils.is_validation_plugin_loaded() and \
-          toolkit.asbool(toolkit.config.get('ckanext.xloader.requires_validation')) and \
-          resource_dict.get('validation_status', None) != 'success':
+                toolkit.asbool(toolkit.config.get('ckanext.xloader.requires_validation')) and \
+                resource_dict.get('validation_status', None) != 'success':
+
             log.debug("Skipping xloading resource %s because the "
                       "resource did not pass validation yet.", resource_dict.get('id'))
             return
+
         self._submit_to_xloader(resource_dict)
 
     def before_resource_show(self, resource_dict):
