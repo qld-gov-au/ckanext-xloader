@@ -46,27 +46,63 @@ class XLoaderFormats(object):
         return format_.lower() in cls._formats
 
 
+def awaiting_validation(res_dict):
+    """
+    Checks the existence of a logic action from the ckanext-validation
+    plugin, thus supporting any extending of the Validation Plugin class.
+
+    Checks ckanext.xloader.validation.requiredSoWaitForReport config
+    option value.
+
+    Checks ckanext.xloader.validation.enforceDefaultsIfSchemaMissing config
+    option value. Then checks the Resource's Schema for the `validation_status` field.
+    """
+    try:
+        p.toolkit.get_action('resource_validation_show')
+        is_validation_plugin_loaded = True
+    except KeyError:
+        is_validation_plugin_loaded = False
+
+    if not is_validation_plugin_loaded or \
+            not p.toolkit.asbool(p.toolkit.config.get('ckanext.xloader.validation.requiredSoWaitForReport', False)):
+        # the validation plugin is not loaded or the validation.requiredSoWaitForReport is turned off
+        return False
+
+    if p.toolkit.asbool(p.toolkit.config.get('ckanext.xloader.validation.enforceDefaultsIfSchemaMissing', True)):
+        # validation.enforceDefaultsIfSchemaMissing is turned on, so we will expect Resources to have `validation_status`
+        if res_dict.get('validation_status', None) != 'success':
+            return True
+        else:
+            return False
+    else:
+        # TODO: check the Resource's schema to see if there is no `validation_status`,
+        # if there is not, then return False, otherwise check if it is `success` or not.
+        return True
+
+    return True
+
+
 def resource_data(id, resource_id, rows=None):
 
     if p.toolkit.request.method == "POST":
-        if is_validation_plugin_loaded() and \
-                p.toolkit.asbool(p.toolkit.config.get('ckanext.xloader.requires_validation')):
 
-            context = {
-                "ignore_auth": True,
-            }
-            resource_dict = p.toolkit.get_action("resource_show")(
-                context,
-                {
-                    "id": resource_id,
-                },
+        context = {
+            "ignore_auth": True,
+        }
+        resource_dict = p.toolkit.get_action("resource_show")(
+            context,
+            {
+                "id": resource_id,
+            },
+        )
+
+        if awaiting_validation(resource_dict):
+            h.flash_error(_("Cannot upload resource %s to the DataStore "
+                            "because the resource did not pass validation yet.") % resource_id)
+            return p.toolkit.redirect_to(
+                "xloader.resource_data", id=id, resource_id=resource_id
             )
-            if resource_dict.get('validation_status', None) != 'success':
-                h.flash_error(_("Cannot upload resource %s to the DataStore "
-                                "because the resource did not pass validation yet.") % resource_id)
-                return p.toolkit.redirect_to(
-                    "xloader.resource_data", id=id, resource_id=resource_id
-                )
+
         try:
             p.toolkit.get_action("xloader_submit")(
                 None,
@@ -281,15 +317,3 @@ def datastore_resource_exists(resource_id):
     except p.toolkit.ObjectNotFound:
         return False
     return response or {'fields': []}
-
-
-def is_validation_plugin_loaded():
-    """
-    Checks the existence of a logic action from the ckanext-validation
-    plugin, thus supporting any extending of the Validation Plugin class.
-    """
-    try:
-        p.toolkit.get_action('resource_validation_show')
-        return True
-    except KeyError:
-        return False
