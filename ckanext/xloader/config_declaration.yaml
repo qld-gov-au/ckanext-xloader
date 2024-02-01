@@ -119,12 +119,25 @@ groups:
             to True.
         type: bool
         required: false
-      - key: ckanext.xloader.requires_validation
+      - key: ckanext.xloader.validation.requiredSoWaitForReport
         default: False
         example: True
         description: |
             Resources are required to pass validation from the ckanext-validation
             plugin to be able to get xloadered.
+        type: bool
+        required: false
+      - key: ckanext.xloader.validation.enforceDefaultsIfSchemaMissing
+        default: True
+        example: False
+        description: |
+            Resources are required to have a Schema including the field `validation_status`.
+
+            If this option is set to `False`, Resources that do not have a `validation_status` field will
+            always be submitted to XLoader.
+
+            See https://github.com/frictionlessdata/ckanext-validation?tab=readme-ov-file#changes-in-the-metadata-schema
+            for more details.
         type: bool
         required: false
 
