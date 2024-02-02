@@ -14,6 +14,10 @@ import ckan.plugins as p
 from ckan.plugins.toolkit import config, h, _
 
 from .job_exceptions import JobError
+from logging import getLogger
+
+
+log = getLogger(__name__)
 
 # resource.formats accepted by ckanext-xloader. Must be lowercase here.
 DEFAULT_FORMATS = [
@@ -57,15 +61,22 @@ def awaiting_validation(res_dict):
     Checks ckanext.xloader.validation.enforceDefaultsIfSchemaMissing config
     option value. Then checks the Resource's Schema for the `validation_status` field.
     """
+    if not p.toolkit.asbool(p.toolkit.config.get('ckanext.xloader.validation.requiredSoWaitForReport', False)):
+        # validation.requiredSoWaitForReport is turned off, return right away
+        return False
+
     try:
+        # check for one of the main actions from ckanext-validation
+        # in the case that users extend the Validation plugin class
+        # and rename the plugin entry-point.
         p.toolkit.get_action('resource_validation_show')
         is_validation_plugin_loaded = True
     except KeyError:
         is_validation_plugin_loaded = False
 
-    if not is_validation_plugin_loaded or \
-            not p.toolkit.asbool(p.toolkit.config.get('ckanext.xloader.validation.requiredSoWaitForReport', False)):
-        # the validation plugin is not loaded or the validation.requiredSoWaitForReport is turned off
+    if not is_validation_plugin_loaded:
+        # the validation plugin is not loaded but required, log a warning
+        log.warning('ckanext.xloader.validation.requiredSoWaitForReport requires the ckanext-validation plugin to be activated.')
         return False
 
     if p.toolkit.asbool(p.toolkit.config.get('ckanext.xloader.validation.enforceDefaultsIfSchemaMissing', True)):
@@ -77,6 +88,7 @@ def awaiting_validation(res_dict):
     else:
         # TODO: check the Resource's schema to see if there is no `validation_status`,
         # if there is not, then return False, otherwise check if it is `success` or not.
+        # default_resource_schema ??
         return True
 
     return True
