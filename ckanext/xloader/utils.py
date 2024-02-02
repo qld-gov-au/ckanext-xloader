@@ -55,14 +55,14 @@ def awaiting_validation(res_dict):
     Checks the existence of a logic action from the ckanext-validation
     plugin, thus supporting any extending of the Validation Plugin class.
 
-    Checks ckanext.xloader.validation.requiredSoWaitForReport config
+    Checks ckanext.xloader.validation.requires_successful_report config
     option value.
 
-    Checks ckanext.xloader.validation.enforceDefaultsIfSchemaMissing config
-    option value. Then checks the Resource's Schema for the `validation_status` field.
+    Checks ckanext.xloader.validation.enforce_schema config
+    option value. Then checks the Resource's validation_status.
     """
-    if not p.toolkit.asbool(p.toolkit.config.get('ckanext.xloader.validation.requiredSoWaitForReport', False)):
-        # validation.requiredSoWaitForReport is turned off, return right away
+    if not p.toolkit.asbool(p.toolkit.config.get('ckanext.xloader.validation.requires_successful_report', False)):
+        # validation.requires_successful_report is turned off, return right away
         return False
 
     try:
@@ -76,22 +76,18 @@ def awaiting_validation(res_dict):
 
     if not is_validation_plugin_loaded:
         # the validation plugin is not loaded but required, log a warning
-        log.warning('ckanext.xloader.validation.requiredSoWaitForReport requires the ckanext-validation plugin to be activated.')
+        log.warning('ckanext.xloader.validation.requires_successful_report requires the ckanext-validation plugin to be activated.')
         return False
 
-    if p.toolkit.asbool(p.toolkit.config.get('ckanext.xloader.validation.enforceDefaultsIfSchemaMissing', True)):
-        # validation.enforceDefaultsIfSchemaMissing is turned on, so we will expect Resources to have `validation_status`
+    if p.toolkit.asbool(p.toolkit.config.get('ckanext.xloader.validation.enforce_schema', True)):
+        # validation.enforce_schema is turned on, so we will always look for `validation_status`
         if res_dict.get('validation_status', None) != 'success':
             return True
-        else:
-            return False
-    else:
-        # TODO: check the Resource's schema to see if there is no `validation_status`,
-        # if there is not, then return False, otherwise check if it is `success` or not.
-        # default_resource_schema ??
-        return True
 
-    return True
+    # validation.enforce_schema is turned off, so if the Resource
+    # does not have a Validation Schema, we will treat it like
+    # it does not require Validation.
+    return False
 
 
 def resource_data(id, resource_id, rows=None):
