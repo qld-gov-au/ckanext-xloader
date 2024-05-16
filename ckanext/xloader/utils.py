@@ -51,6 +51,10 @@ class XLoaderFormats(object):
         return format_.lower() in cls._formats
 
 
+def requires_successful_validation_report():
+    return p.toolkit.asbool(config.get('ckanext.xloader.validation.requires_successful_report', False))
+
+
 def awaiting_validation(res_dict):
     """
     Checks the existence of a logic action from the ckanext-validation
@@ -62,7 +66,7 @@ def awaiting_validation(res_dict):
     Checks ckanext.xloader.validation.enforce_schema config
     option value. Then checks the Resource's validation_status.
     """
-    if not p.toolkit.asbool(p.toolkit.config.get('ckanext.xloader.validation.requires_successful_report', False)):
+    if not requires_successful_validation_report():
         # validation.requires_successful_report is turned off, return right away
         return False
 
