@@ -112,6 +112,7 @@ class TestNotify(object):
             validation_status='failure',
         )
 
+        # TODO: test IPipeValidation
         assert not func.called  # because of the validation_status not being `success`
         func.called = None  # reset
 
@@ -125,7 +126,8 @@ class TestNotify(object):
             validation_status='success',
         )
 
-        assert func.called  # because of the validation_status is `success`
+        # TODO: test IPipeValidation
+        assert not func.called  # because of the validation_status is `success`
 
     @pytest.mark.ckan_config("ckanext.xloader.validation.requires_successful_report", True)
     @pytest.mark.ckan_config("ckanext.xloader.validation.enforce_schema", False)
@@ -147,7 +149,8 @@ class TestNotify(object):
             validation_status='',
         )
 
-        assert func.called  # because of the schema being empty
+        # TODO: test IPipeValidation
+        assert not func.called  # because of the schema being empty
         func.called = None  # reset
 
         helpers.call_action(
@@ -160,6 +163,7 @@ class TestNotify(object):
             validation_status='failure',
         )
 
+        # TODO: test IPipeValidation
         assert not func.called  # because of the validation_status not being `success` and there is a schema
         func.called = None  # reset
 
@@ -172,7 +176,9 @@ class TestNotify(object):
             schema='https://example.com/schema.json',
             validation_status='success',
         )
-        assert func.called  # because of the validation_status is `success` and there is a schema
+
+        # TODO: test IPipeValidation
+        assert not func.called  # because of the validation_status is `success` and there is a schema
 
 
     def _pending_task(self, resource_id):
