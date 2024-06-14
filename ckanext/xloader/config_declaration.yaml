@@ -128,6 +128,13 @@ groups:
             to True.
         type: bool
         required: false
+      - key: ckanext.xloader.queue_names
+        default: default
+        example: foo baz
+        description: |
+            A whitespace-separated list of queues to enqueue XLoader jobs to.
+            Jobs for the same package will be sent to the same queue.
+        required: false
       - key: ckanext.xloader.clean_datastore_tables
         default: False
         example: True
