@@ -124,7 +124,7 @@ class xloaderPlugin(plugins.SingletonPlugin):
             # extension will call resource_patch and this method should
             # be called again. However, url_changed will not be in the entity
             # once Validation does the patch.
-            log.debug("Skipping xloading resource %s because the "
+            log.debug("Deferring xloading resource %s because the "
                       "resource did not pass validation yet.", resource_dict.get('id'))
             return
         elif not getattr(entity, 'url_changed', False):
@@ -137,7 +137,7 @@ class xloaderPlugin(plugins.SingletonPlugin):
 
     def after_resource_create(self, context, resource_dict):
         if utils.requires_successful_validation_report():
-            log.debug("Skipping xloading resource %s because the "
+            log.debug("Deferring xloading resource %s because the "
                       "resource did not pass validation yet.", resource_dict.get('id'))
             return
 
