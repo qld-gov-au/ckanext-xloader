@@ -217,6 +217,11 @@ Badge notification on what xloader is doing
 
      ``ckanext.xloader.debug_badges = True|False (default False)``
 
+    # If set to True allows unicode characters in header names.
+    # If set to False (default), characters are encoded to ascii
+    # using the unidecode library.
+    ckanext.xloader.unicode_headers = False
+
 ------------------------
 Developer installation
 ------------------------
