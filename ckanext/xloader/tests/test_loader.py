@@ -1400,8 +1400,8 @@ class TestLoadTabulator(TestLoadBase):
             u'תקן ישראלי מותר',
             Decimal('400'),
             datetime.datetime(2018, 9, 20, 0, 0),
-            Decimal('44.85000000000000142108547152020037174224853515625'),
-            Decimal('11.199999999999999289457264239899814128875732421875')
+            Decimal('44.85'),
+            Decimal('11.2')
         )
         print(self._get_column_names(resource_id))
         assert self._get_column_names(resource_id) == [
