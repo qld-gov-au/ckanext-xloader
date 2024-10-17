@@ -217,6 +217,10 @@ Badge notification on what xloader is doing
 
      ``ckanext.xloader.debug_badges = True|False (default False)``
 
+Queue name(s) to put jobs on:
+
+     ``ckanext.xloader.queue_names = foo,baz``
+
 ------------------------
 Developer installation
 ------------------------
