@@ -817,13 +817,13 @@ class TestLoadCsv(TestLoadBase):
         )
 
     @pytest.mark.ckan_config('ckanext.xloader.unicode_headers', 'True')
-    def test_unicode_column_names(self):
+    def test_unicode_column_names(self, Session):
         csv_filepath = get_sample_filepath('hebrew_sample.csv')
-        resource_id = 'test_hebrew'
-        factories.Resource(id=resource_id)
+        resource = factories.Resource()
+        resource_id = resource['id']
         loader.load_csv(csv_filepath, resource_id=resource_id,
                         mimetype='text/csv', logger=logger)
-        records = self._get_records('test_hebrew')
+        records = self._get_records(Session, resource_id)
         print(records)
         assert records[0] == (
             1,
@@ -837,8 +837,8 @@ class TestLoadCsv(TestLoadBase):
             u'20/09/2018',
             u'44.85', u'11.20'
         )
-        print(self._get_column_names('test_hebrew'))
-        assert self._get_column_names('test_hebrew') == [
+        print(self._get_column_names(resource_id))
+        assert self._get_column_names(resource_id) == [
             u'_id',
             u'_full_text',
             u'זיהוי',
@@ -1382,13 +1382,13 @@ class TestLoadTabulator(TestLoadBase):
         ]
 
     @pytest.mark.ckan_config('ckanext.xloader.unicode_headers', 'True')
-    def test_hebrew_unicode_headers(self):
+    def test_hebrew_unicode_headers(self, Session):
         xlsx_filepath = get_sample_filepath('hebrew_sample.xlsx')
-        resource_id = 'hebrew_sample_xlsx'
-        factories.Resource(id=resource_id)
+        resource = factories.Resource()
+        resource_id = resource['id']
         loader.load_table(xlsx_filepath, resource_id=resource_id,
                           mimetype='xlsx', logger=logger)
-        records = self._get_records('hebrew_sample_xlsx')
+        records = self._get_records(Session, resource_id)
         print(records)
         assert records[0] == (
             1,
@@ -1403,8 +1403,8 @@ class TestLoadTabulator(TestLoadBase):
             Decimal('44.85000000000000142108547152020037174224853515625'),
             Decimal('11.199999999999999289457264239899814128875732421875')
         )
-        print(self._get_column_names('hebrew_sample_xlsx'))
-        assert self._get_column_names('hebrew_sample_xlsx') == [
+        print(self._get_column_names(resource_id))
+        assert self._get_column_names(resource_id) == [
             u'_id',
             u'_full_text',
             u'זיהוי',
