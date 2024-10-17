@@ -107,19 +107,17 @@ def xloader_badge(resource):
     title = toolkit.h.render_datetime(xloader_job.get('last_updated'), with_hours=True) \
         if xloader_job.get('last_updated') else ''
 
+    img_markup = '<img src="{}" alt="{}" title="{}"/>'.format(
+        badge_url,
+        html_escape(messages[status], quote=True),
+        html_escape(title, quote=True)
+    )
     try:
         toolkit.check_access('resource_update', {'user': toolkit.g.user}, {'id': resource.get('id')})
         pusher_url = toolkit.h.url_for('xloader.resource_data',
                                        id=resource.get('package_id'),
                                        resource_id=resource.get('id'))
 
-        return Markup(u'<a href="{pusher_url}" class="loader-badge"><img src="{badge_url}" alt="{alt}" title="{title}"/></a>'.format(
-            pusher_url=pusher_url,
-            badge_url=badge_url,
-            alt=html_escape(messages[status], quote=True),
-            title=html_escape(title, quote=True)))
+        return Markup(u'<a href="{}" class="loader-badge">{}</a>'.format(pusher_url, img_markup))
     except toolkit.NotAuthorized:
-        return Markup(u'<span class="loader-badge"><img src="{badge_url}" alt="{alt}" title="{title}"/></span>'.format(
-            badge_url=badge_url,
-            alt=html_escape(messages[status], quote=True),
-            title=html_escape(title, quote=True)))
+        return Markup(u'<span class="loader-badge">{}</span>'.format(img_markup))

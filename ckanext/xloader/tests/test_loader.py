@@ -52,11 +52,11 @@ class TestLoadBase(object):
             )
         else:
             cols = "*"
-        sql = 'SELECT {cols} FROM "{table_name}"'.format(
+        sql = u'SELECT {cols} FROM "{table_name}"'.format(
             cols=cols, table_name=table_name
         )
         if limit is not None:
-            sql += " LIMIT {}".format(limit)
+            sql += u' LIMIT {}'.format(limit)
         results = c.execute(sql)
         return results.fetchall()
 
@@ -816,8 +816,46 @@ class TestLoadCsv(TestLoadBase):
             u"Galway",
         )
 
+    @pytest.mark.ckan_config('ckanext.xloader.unicode_headers', 'True')
+    def test_unicode_column_names(self, Session):
+        csv_filepath = get_sample_filepath('hebrew_sample.csv')
+        resource = factories.Resource()
+        resource_id = resource['id']
+        loader.load_csv(csv_filepath, resource_id=resource_id,
+                        mimetype='text/csv', logger=logger)
+        records = self._get_records(Session, resource_id)
+        print(records)
+        assert records[0] == (
+            1,
+            u'229312',
+            u'פ בית העמק עמקה 3',
+            u'360',
+            u'פרטי',
+            u'Cl',
+            u'תקן ישראלי מותר',
+            u'400',
+            u'20/09/2018',
+            u'44.85', u'11.20'
+        )
+        print(self._get_column_names(resource_id))
+        assert self._get_column_names(resource_id) == [
+            u'_id',
+            u'_full_text',
+            u'זיהוי',
+            u'שם',
+            u'תא דיווח',
+            u'שימוש',
+            u'פרמטר',
+            u'סוג תקן מי שתייה',
+            u'ערך תקן',
+            u'תאריך דיגום אחרון',
+            u'ריכוז אחרון',
+            u'אחוז מתקן מי השתיה'
+        ]
+
 
 class TestLoadUnhandledTypes(TestLoadBase):
+
     def test_kml(self):
         filepath = get_sample_filepath("polling_locations.kml")
         resource = factories.Resource()
@@ -969,23 +1007,6 @@ class TestLoadTabulator(TestLoadBase):
         assert fields[0].get("info", {}).get("type_override", "") == "timestamp"
         assert fields[1].get("info", {}).get("type_override", "") == "numeric"
         assert fields[2].get("info", {}).get("type_override", "") == ""
-
-    def test_simple_large_file(self, Session):
-        csv_filepath = get_sample_filepath("simple-large.csv")
-        resource = factories.Resource()
-        resource_id = resource['id']
-        loader.load_table(
-            csv_filepath,
-            resource_id=resource_id,
-            mimetype="text/csv",
-            logger=logger,
-        )
-        assert self._get_column_types(Session, resource_id) == [
-            u"int4",
-            u"tsvector",
-            u"numeric",
-            u"text",
-        ]
 
     def test_simple_large_file(self, Session):
         csv_filepath = get_sample_filepath("simple-large.csv")
@@ -1358,4 +1379,42 @@ class TestLoadTabulator(TestLoadBase):
              "9:00-13:00", "14:00-16:45", datetime.datetime(2018, 7, 17)),
             (3, "Barcaldine", 4725, Decimal("-23.55327901"), Decimal("145.289156"),
              "9:00-12:30", "13:30-16:30", datetime.datetime(2018, 7, 20))
+        ]
+
+    @pytest.mark.ckan_config('ckanext.xloader.unicode_headers', 'True')
+    def test_hebrew_unicode_headers(self, Session):
+        xlsx_filepath = get_sample_filepath('hebrew_sample.xlsx')
+        resource = factories.Resource()
+        resource_id = resource['id']
+        loader.load_table(xlsx_filepath, resource_id=resource_id,
+                          mimetype='xlsx', logger=logger)
+        records = self._get_records(Session, resource_id)
+        print(records)
+        assert records[0] == (
+            1,
+            Decimal('229312'),
+            u'פ בית העמק עמקה 3',
+            Decimal('360'),
+            u'פרטי',
+            u'Cl',
+            u'תקן ישראלי מותר',
+            Decimal('400'),
+            datetime.datetime(2018, 9, 20, 0, 0),
+            Decimal('44.85'),
+            Decimal('11.2')
+        )
+        print(self._get_column_names(resource_id))
+        assert self._get_column_names(resource_id) == [
+            u'_id',
+            u'_full_text',
+            u'זיהוי',
+            u'שם',
+            u'תא דיווח',
+            u'שימוש',
+            u'פרמטר',
+            u'סוג תקן מי שתייה',
+            u'ערך תקן',
+            u'תאריך דיגום אחרון',
+            u'ריכוז אחרון',
+            u'אחוז מתקן מי השתיה'
         ]
