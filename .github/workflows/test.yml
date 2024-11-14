@@ -22,9 +22,13 @@ jobs:
   test:
     needs: lint
     strategy:
+      fail-fast: false
       matrix:
         ckan-version: ["2.11", "2.10", 2.9]
-      fail-fast: false
+        experimental: [false]
+        include:
+          - ckan-version: 'master'
+            experimental: true  #master is unstable, good to know if we are compatible or not
 
     name: CKAN ${{ matrix.ckan-version }}
     runs-on: ubuntu-latest
@@ -52,19 +56,34 @@ jobs:
       CKAN_REDIS_URL: redis://redis:6379/1
 
     steps:
-    - uses: actions/checkout@v4
-    - if: ${{ matrix.ckan-version == 2.9 }}
-      run: pip install "setuptools>=44.1.0,<71"
-    - name: Install requirements
-      run: |
-        pip install -r requirements.txt
-        pip install -r dev-requirements.txt
-        pip install -e .
-        pip install -U requests[security]
-        # Replace default path to CKAN core config file with the one on the container
-        sed -i -e 's/use = config:.*/use = config:\/srv\/app\/src\/ckan\/test-core.ini/' test.ini
-    - name: Setup extension (CKAN >= 2.9)
-      run: |
-        ckan -c test.ini db init
-    - name: Run tests
-      run: pytest --ckan-ini=test.ini --cov=ckanext.xloader --disable-warnings ckanext/xloader/tests
+      - uses: actions/checkout@v4
+        continue-on-error: ${{ matrix.experimental }}
+
+      - if: ${{ matrix.ckan-version == 2.9 }}
+        continue-on-error: ${{ matrix.experimental }}
+        run: pip install "setuptools>=44.1.0,<71"
+      - name: Install requirements
+        continue-on-error: ${{ matrix.experimental }}
+        run: |
+          pip install -r requirements.txt
+          pip install -r dev-requirements.txt
+          pip install -e .
+          pip install -U requests[security]
+          # Replace default path to CKAN core config file with the one on the container
+          sed -i -e 's/use = config:.*/use = config:\/srv\/app\/src\/ckan\/test-core.ini/' test.ini
+
+      - name: Setup extension (CKAN >= 2.9)
+        continue-on-error: ${{ matrix.experimental }}
+        run: |
+          ckan -c test.ini db init
+
+      - name: Run tests
+        continue-on-error: ${{ matrix.experimental }}
+        run: pytest --ckan-ini=test.ini --cov=ckanext.xloader --disable-warnings ckanext/xloader/tests --junit-xml=/tmp/artifacts/junit/results.xml
+
+      - name: Test Summary
+        uses: test-summary/action@v2
+        continue-on-error: ${{ matrix.experimental }}
+        with:
+          paths: "/tmp/artifacts/junit/*.xml"
+        if: always()
