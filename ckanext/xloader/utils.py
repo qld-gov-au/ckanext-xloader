@@ -2,6 +2,7 @@
 
 import json
 import datetime
+from rq import get_current_job
 
 from six import text_type as str, binary_type
 
@@ -12,8 +13,6 @@ from decimal import Decimal
 
 import ckan.plugins as p
 from ckan.plugins.toolkit import config, h, _
-
-from .job_exceptions import JobError
 
 from logging import getLogger
 
@@ -58,11 +57,14 @@ def requires_successful_validation_report():
 
 
 def awaiting_validation(res_dict):
+    # type: (dict) -> bool
     """
     Checks the existence of a logic action from the ckanext-validation
     plugin, thus supporting any extending of the Validation Plugin class.
+
     Checks ckanext.xloader.validation.requires_successful_report config
     option value.
+
     Checks ckanext.xloader.validation.enforce_schema config
     option value. Then checks the Resource's validation_status.
     """
@@ -273,7 +275,7 @@ def type_guess(rows, types=TYPES, strict=False):
         at_least_one_value = []
         for ri, row in enumerate(rows):
             diff = len(row) - len(guesses)
-            for _ in range(diff):
+            for _i in range(diff):
                 typesdict = {}
                 for type in types:
                     typesdict[type] = 0

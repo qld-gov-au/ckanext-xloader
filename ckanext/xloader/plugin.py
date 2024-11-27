@@ -7,6 +7,7 @@ from ckan.plugins import toolkit
 
 from ckan.model.domain_object import DomainObjectOperation
 from ckan.model.resource import Resource
+from ckan.model.package import Package
 
 from . import action, auth, helpers as xloader_helpers, utils
 from ckanext.xloader.utils import XLoaderFormats
@@ -90,6 +91,7 @@ class xloaderPlugin(plugins.SingletonPlugin):
             # thus we need to do sync=True to have Xloader put the job at the front of the queue.
             sync = toolkit.asbool(toolkit.config.get(u'ckanext.validation.run_on_update_async', True))
             self._submit_to_xloader(res_dict, sync=sync)
+
 
     # IDomainObjectModification
 
@@ -183,7 +185,7 @@ class xloaderPlugin(plugins.SingletonPlugin):
         def after_update(self, context, resource_dict):
             self.after_resource_update(context, resource_dict)
 
-    def _submit_to_xloader(self, resource_dict):
+    def _submit_to_xloader(self, resource_dict, sync=False):
         context = {"ignore_auth": True, "defer_commit": True}
         resource_format = resource_dict.get("format")
         if not XLoaderFormats.is_it_an_xloader_format(resource_format):
@@ -203,14 +205,20 @@ class xloaderPlugin(plugins.SingletonPlugin):
             return
 
         try:
-            log.debug(
-                "Submitting resource %s to be xloadered", resource_dict["id"]
-            )
+            if sync:
+                log.debug(
+                    "xloadering resource %s in sync mode", resource_dict["id"]
+                )
+            else:
+                log.debug(
+                    "Submitting resource %s to be xloadered", resource_dict["id"]
+                )
             toolkit.get_action("xloader_submit")(
                 context,
                 {
                     "resource_id": resource_dict["id"],
                     "ignore_hash": self.ignore_hash,
+                    "sync": sync,
                 },
             )
         except toolkit.ValidationError as e:
