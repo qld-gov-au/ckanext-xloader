@@ -3,17 +3,120 @@
 import json
 import datetime
 
+from six import text_type as str, binary_type
+
 from ckan import model
 from ckan.lib import search
 from collections import defaultdict
 from decimal import Decimal
 
 import ckan.plugins as p
+from ckan.plugins.toolkit import config, h, _
+
+from .job_exceptions import JobError
+
+from logging import getLogger
+
+
+log = getLogger(__name__)
+
+# resource.formats accepted by ckanext-xloader. Must be lowercase here.
+DEFAULT_FORMATS = [
+    "csv",
+    "application/csv",
+    "xls",
+    "xlsx",
+    "tsv",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "ods",
+    "application/vnd.oasis.opendocument.spreadsheet",
+]
+
+
+class XLoaderFormats(object):
+    formats = None
+
+    @classmethod
+    def is_it_an_xloader_format(cls, format_):
+        if cls.formats is None:
+            cls._formats = config.get("ckanext.xloader.formats")
+            if cls._formats is not None:
+                # use config value. preserves empty list as well.
+                cls._formats = cls._formats.lower().split()
+            else:
+                cls._formats = DEFAULT_FORMATS
+        if not format_:
+            return False
+        return format_.lower() in cls._formats
+
+
+def requires_successful_validation_report():
+    return p.toolkit.asbool(config.get('ckanext.xloader.validation.requires_successful_report', False))
+
+
+def awaiting_validation(res_dict):
+    """
+    Checks the existence of a logic action from the ckanext-validation
+    plugin, thus supporting any extending of the Validation Plugin class.
+
+    Checks ckanext.xloader.validation.requires_successful_report config
+    option value.
+
+    Checks ckanext.xloader.validation.enforce_schema config
+    option value. Then checks the Resource's validation_status.
+    """
+    if not requires_successful_validation_report():
+        # validation.requires_successful_report is turned off, return right away
+        return False
+
+    try:
+        # check for one of the main actions from ckanext-validation
+        # in the case that users extend the Validation plugin class
+        # and rename the plugin entry-point.
+        p.toolkit.get_action('resource_validation_show')
+        is_validation_plugin_loaded = True
+    except KeyError:
+        is_validation_plugin_loaded = False
+
+    if not is_validation_plugin_loaded:
+        # the validation plugin is not loaded but required, log a warning
+        log.warning('ckanext.xloader.validation.requires_successful_report requires the ckanext-validation plugin to be activated.')
+        return False
+
+    if (p.toolkit.asbool(config.get('ckanext.xloader.validation.enforce_schema', True))
+            or res_dict.get('schema', None)) and res_dict.get('validation_status', None) != 'success':
+
+        # either validation.enforce_schema is turned on or it is off and there is a schema,
+        # we then explicitly check for the `validation_status` report to be `success``
+        return True
+
+    # at this point, we can assume that the Resource is not waiting for Validation.
+    # or that the Resource does not have a Validation Schema and we are not enforcing schemas.
+    return False
 
 
 def resource_data(id, resource_id, rows=None):
 
     if p.toolkit.request.method == "POST":
+
+        context = {
+            "ignore_auth": True,
+        }
+        resource_dict = p.toolkit.get_action("resource_show")(
+            context,
+            {
+                "id": resource_id,
+            },
+        )
+
+        if awaiting_validation(resource_dict):
+            h.flash_error(_("Cannot upload resource %s to the DataStore "
+                            "because the resource did not pass validation yet.") % resource_id)
+            return p.toolkit.redirect_to(
+                "xloader.resource_data", id=id, resource_id=resource_id
+            )
+
         try:
             p.toolkit.get_action("xloader_submit")(
                 None,
@@ -83,6 +186,7 @@ def set_resource_metadata(update_dict):
     # better fix
 
     q = model.Session.query(model.Resource). \
+        with_for_update(of=model.Resource). \
         filter(model.Resource.id == update_dict['resource_id'])
     resource = q.one()
 
@@ -152,7 +256,7 @@ def headers_guess(rows, tolerance=1):
     return 0, []
 
 
-TYPES = [int, bool, str, datetime.datetime, float, Decimal]
+TYPES = [int, bool, str, binary_type, datetime.datetime, float, Decimal]
 
 
 def type_guess(rows, types=TYPES, strict=False):
@@ -169,7 +273,7 @@ def type_guess(rows, types=TYPES, strict=False):
         at_least_one_value = []
         for ri, row in enumerate(rows):
             diff = len(row) - len(guesses)
-            for _ in range(diff):
+            for _i in range(diff):
                 typesdict = {}
                 for type in types:
                     typesdict[type] = 0
@@ -178,10 +282,10 @@ def type_guess(rows, types=TYPES, strict=False):
             for ci, cell in enumerate(row):
                 if not cell:
                     continue
-                at_least_one_value[ci] = True
                 for type in list(guesses[ci].keys()):
                     if not isinstance(cell, type):
                         guesses[ci].pop(type)
+                at_least_one_value[ci] = True if guesses[ci] else False
         # no need to set guessing weights before this
         # because we only accept a type if it never fails
         for i, guess in enumerate(guesses):
@@ -195,7 +299,7 @@ def type_guess(rows, types=TYPES, strict=False):
     else:
         for i, row in enumerate(rows):
             diff = len(row) - len(guesses)
-            for _ in range(diff):
+            for _i in range(diff):
                 guesses.append(defaultdict(int))
             for i, cell in enumerate(row):
                 # add string guess so that we have at least one guess
@@ -213,5 +317,17 @@ def type_guess(rows, types=TYPES, strict=False):
         # element in case of a tie
         # See: http://stackoverflow.com/a/6783101/214950
         guesses_tuples = [(t, guess[t]) for t in types if t in guess]
+        if not guesses_tuples:
+            raise JobError('Failed to guess types')
         _columns.append(max(guesses_tuples, key=lambda t_n: t_n[1])[0])
     return _columns
+
+
+def datastore_resource_exists(resource_id):
+    context = {'model': model, 'ignore_auth': True}
+    try:
+        response = p.toolkit.get_action('datastore_search')(context, dict(
+            id=resource_id, limit=0))
+    except p.toolkit.ObjectNotFound:
+        return False
+    return response or {'fields': []}
