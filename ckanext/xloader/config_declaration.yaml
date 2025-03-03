@@ -31,6 +31,7 @@ groups:
         description: |
             Uses a specific API token for the xloader_submit action instead of the
             apikey of the site_user.
+        default: 'NOT_SET'
         required: true
       - key: ckanext.xloader.formats
         example: csv application/csv xls application/vnd.ms-excel
