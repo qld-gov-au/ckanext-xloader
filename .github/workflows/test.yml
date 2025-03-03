@@ -65,11 +65,6 @@ jobs:
     - uses: actions/checkout@v4
       continue-on-error: ${{ matrix.experimental }}
 
-    - name: Pin setuptools for ckan 2.9 only
-      if: ${{ matrix.ckan-version == 2.9 }}
-      run: pip install "setuptools>=44.1.0,<71"
-      continue-on-error: ${{ matrix.experimental }}
-
     - name: Install requirements
       continue-on-error: ${{ matrix.experimental }}
       run: |

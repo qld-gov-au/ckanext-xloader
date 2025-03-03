@@ -48,13 +48,7 @@ def _get_temp_files(dir='/tmp'):
 
 @pytest.fixture
 def apikey():
-    if toolkit.check_ckan_version(min_version="2.10"):
-        sysadmin = factories.SysadminWithToken()
-    else:
-        # To provide support with CKAN 2.9
-        sysadmin = factories.Sysadmin()
-        sysadmin["token"] = get_xloader_user_apitoken()
-
+    sysadmin = factories.SysadminWithToken()
     return sysadmin["token"]
 
 
