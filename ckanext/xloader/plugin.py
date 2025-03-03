@@ -61,12 +61,6 @@ class xloaderPlugin(plugins.SingletonPlugin):
         else:
             self.ignore_hash = False
 
-        site_url_configs = ("ckan.site_url", "ckanext.xloader.site_url")
-        if not any(site_url_configs):
-            raise Exception(
-                f"One of config options {site_url_configs} must be set to use ckanext-xloader."
-            )
-
     # IDomainObjectModification
 
     def notify(self, entity, operation):
