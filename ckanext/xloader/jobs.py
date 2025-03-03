@@ -15,10 +15,11 @@ from psycopg2 import errors
 from six.moves.urllib.parse import urlsplit
 import requests
 from rq import get_current_job
+from rq.timeouts import JobTimeoutException
 import sqlalchemy as sa
 
 from ckan import model
-from ckan.plugins.toolkit import get_action, asbool, enqueue_job, ObjectNotFound, config
+from ckan.plugins.toolkit import get_action, asbool, enqueue_job, ObjectNotFound, config, h
 
 from . import db, loader
 from .job_exceptions import JobError, HTTPError, DataTooBigError, FileCouldNotBeLoadedError
@@ -124,6 +125,7 @@ def xloader_data_into_datastore(input):
             if tries < MAX_RETRIES:
                 tries = tries + 1
                 log.info("Job %s failed due to temporary error [%s], retrying", job_id, e)
+                logger.info("Job failed due to temporary error [%s], retrying", e)
                 job_dict['status'] = 'pending'
                 job_dict['metadata']['tries'] = tries
                 enqueue_job(
@@ -176,8 +178,14 @@ def xloader_data_into_datastore_(input, job_dict, logger):
     logger.info('Express Load starting: %s', resource_ckan_url)
 
     # check if the resource url_type is a datastore
-    if resource.get('url_type') == 'datastore':
-        logger.info('Ignoring resource - url_type=datastore - dump files are '
+    if hasattr(h, "datastore_rw_resource_url_types"):
+        datastore_rw_resource_url_types = h.datastore_rw_resource_url_types()
+    else:
+        #fallback for 2.10.x or older.
+        datastore_rw_resource_url_types = ['datastore']
+           
+    if resource.get('url_type') in datastore_rw_resource_url_types:
+        logger.info('Ignoring resource - R/W DataStore resources are '
                     'managed with the Datastore API')
         return
 
@@ -245,7 +253,12 @@ def xloader_data_into_datastore_(input, job_dict, logger):
     logger.info("'use_type_guessing' mode is: %s", use_type_guessing)
     try:
         if use_type_guessing:
-            tabulator_load()
+            try:
+                tabulator_load()
+            except JobError as e:
+                logger.warning('Load using tabulator failed: %s', e)
+                logger.info('Trying again with direct COPY')
+                direct_load()
         else:
             try:
                 direct_load()
@@ -253,6 +266,13 @@ def xloader_data_into_datastore_(input, job_dict, logger):
                 logger.warning('Load using COPY failed: %s', e)
                 logger.info('Trying again with tabulator')
                 tabulator_load()
+    except JobTimeoutException as e:
+        try:
+            tmp_file.close()
+        except FileNotFoundError:
+            pass
+        logger.warning('Job timed out after %ss', RETRIED_JOB_TIMEOUT)
+        raise JobError('Job timed out after {}s'.format(RETRIED_JOB_TIMEOUT))
     except FileCouldNotBeLoadedError as e:
         logger.warning('Loading excerpt for this format not supported.')
         logger.error('Loading file raised an error: %s', e)
@@ -352,6 +372,7 @@ def _download_resource_data(resource, data, api_key, logger):
         response.close()
         data['datastore_contains_all_records_of_source_file'] = False
     except requests.exceptions.HTTPError as error:
+        tmp_file.close()
         # status code error
         logger.debug('HTTP error: %s', error)
         raise HTTPError(
@@ -363,6 +384,7 @@ def _download_resource_data(resource, data, api_key, logger):
         raise JobError('Connection timed out after {}s'.format(
                        DOWNLOAD_TIMEOUT))
     except requests.exceptions.RequestException as e:
+        tmp_file.close()
         try:
             err_message = str(e.reason)
         except AttributeError:
@@ -371,6 +393,10 @@ def _download_resource_data(resource, data, api_key, logger):
         raise HTTPError(
             message=err_message, status_code=None,
             request_url=url, response=None)
+    except JobTimeoutException as e:
+        tmp_file.close()
+        logger.warning('Job timed out after %ss', RETRIED_JOB_TIMEOUT)
+        raise JobError('Job timed out after {}s'.format(RETRIED_JOB_TIMEOUT))
 
     logger.info('Downloaded ok - %s', printable_file_size(length))
     file_hash = m.hexdigest()

@@ -7,10 +7,15 @@ from ckan.plugins import toolkit
 
 from ckan.model.domain_object import DomainObjectOperation
 from ckan.model.resource import Resource
-from ckan.model.package import Package
 
 from . import action, auth, helpers as xloader_helpers, utils
 from ckanext.xloader.utils import XLoaderFormats
+
+try:
+    from ckanext.validation.interfaces import IPipeValidation
+    HAS_IPIPE_VALIDATION = True
+except ImportError:
+    HAS_IPIPE_VALIDATION = False
 
 try:
     config_declarations = toolkit.blanket.config_declarations
@@ -19,6 +24,12 @@ except AttributeError:
     # Remove when dropping support.
     def config_declarations(cls):
         return cls
+
+if toolkit.check_ckan_version(min_version='2.11'):
+    from ckanext.datastore.interfaces import IDataDictionaryForm
+    has_idata_dictionary_form = True
+else:
+    has_idata_dictionary_form = False
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +45,10 @@ class xloaderPlugin(plugins.SingletonPlugin):
     plugins.implements(plugins.IResourceController, inherit=True)
     plugins.implements(plugins.IClick)
     plugins.implements(plugins.IBlueprint)
+    if has_idata_dictionary_form:
+        plugins.implements(IDataDictionaryForm, inherit=True)
+    if HAS_IPIPE_VALIDATION:
+        plugins.implements(IPipeValidation)
 
     # IClick
     def get_commands(self):
@@ -60,6 +75,29 @@ class xloaderPlugin(plugins.SingletonPlugin):
             self.ignore_hash = True
         else:
             self.ignore_hash = False
+
+        for config_option in ("ckan.site_url",):
+            if not config_.get(config_option):
+                raise Exception(
+                    "Config option `{0}` must be set to use ckanext-xloader.".format(
+                        config_option
+                    )
+                )
+
+    # IPipeValidation
+
+    def receive_validation_report(self, validation_report):
+        if utils.requires_successful_validation_report():
+            res_dict = toolkit.get_action('resource_show')({'ignore_auth': True},
+                                                           {'id': validation_report.get('resource_id')})
+            if (toolkit.asbool(toolkit.config.get('ckanext.xloader.validation.enforce_schema', True))
+                or res_dict.get('schema', None)) and validation_report.get('status') != 'success':
+                    # A schema is present, or required to be present
+                    return
+            # if validation is running in async mode, it is running from the redis workers.
+            # thus we need to do sync=True to have Xloader put the job at the front of the queue.
+            sync = toolkit.asbool(toolkit.config.get(u'ckanext.validation.run_on_update_async', True))
+            self._submit_to_xloader(res_dict, sync=sync)
 
     # IDomainObjectModification
 
@@ -88,7 +126,16 @@ class xloaderPlugin(plugins.SingletonPlugin):
         if _should_remove_unsupported_resource_from_datastore(resource_dict):
             toolkit.enqueue_job(fn=_remove_unsupported_resource_from_datastore, args=[entity.id])
 
-        if not getattr(entity, 'url_changed', False):
+        if utils.requires_successful_validation_report():
+            # If the resource requires validation, stop here if validation
+            # has not been performed or did not succeed. The Validation
+            # extension will call resource_patch and this method should
+            # be called again. However, url_changed will not be in the entity
+            # once Validation does the patch.
+            log.debug("Deferring xloading resource %s because the "
+                      "resource did not pass validation yet.", resource_dict.get('id'))
+            return
+        elif not getattr(entity, 'url_changed', False):
             # do not submit to xloader if the url has not changed.
             return
 
@@ -97,6 +144,11 @@ class xloaderPlugin(plugins.SingletonPlugin):
     # IResourceController
 
     def after_resource_create(self, context, resource_dict):
+        if utils.requires_successful_validation_report():
+            log.debug("Deferring xloading resource %s because the "
+                      "resource did not pass validation yet.", resource_dict.get('id'))
+            return
+
         self._submit_to_xloader(resource_dict)
 
     def before_resource_show(self, resource_dict):
@@ -139,7 +191,7 @@ class xloaderPlugin(plugins.SingletonPlugin):
         def after_update(self, context, resource_dict):
             self.after_resource_update(context, resource_dict)
 
-    def _submit_to_xloader(self, resource_dict):
+    def _submit_to_xloader(self, resource_dict, sync=False):
         context = {"ignore_auth": True, "defer_commit": True}
         resource_format = resource_dict.get("format")
         if not XLoaderFormats.is_it_an_xloader_format(resource_format):
@@ -159,14 +211,20 @@ class xloaderPlugin(plugins.SingletonPlugin):
             return
 
         try:
-            log.debug(
-                "Submitting resource %s to be xloadered", resource_dict["id"]
-            )
+            if sync:
+                log.debug(
+                    "xloadering resource %s in sync mode", resource_dict["id"]
+                )
+            else:
+                log.debug(
+                    "Submitting resource %s to be xloadered", resource_dict["id"]
+                )
             toolkit.get_action("xloader_submit")(
                 context,
                 {
                     "resource_id": resource_dict["id"],
                     "ignore_hash": self.ignore_hash,
+                    "sync": sync,
                 },
             )
         except toolkit.ValidationError as e:
@@ -201,6 +259,23 @@ class xloaderPlugin(plugins.SingletonPlugin):
             "is_resource_supported_by_xloader": xloader_helpers.is_resource_supported_by_xloader,
             "xloader_badge": xloader_helpers.xloader_badge,
         }
+
+    # IDataDictionaryForm
+
+    def update_datastore_create_schema(self, schema):
+        default = toolkit.get_validator('default')
+        boolean_validator = toolkit.get_validator('boolean_validator')
+        to_datastore_plugin_data = toolkit.get_validator('to_datastore_plugin_data')
+        schema['fields']['strip_extra_white'] = [default(True), boolean_validator, to_datastore_plugin_data('xloader')]
+        return schema
+
+    def update_datastore_info_field(self, field, plugin_data):
+        # expose all our non-secret plugin data in the field
+        field.update(plugin_data.get('xloader', {}))
+        # CKAN version parody
+        if '_info' in plugin_data:
+            field.update({'info': plugin_data['_info']})
+        return field
 
 
 def _should_remove_unsupported_resource_from_datastore(res_dict):
