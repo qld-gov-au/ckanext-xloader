@@ -40,7 +40,7 @@ def is_resource_supported_by_xloader(res_dict, check_access=True):
         try:
             is_supported_url_type = url_type not in toolkit.h.datastore_rw_resource_url_types()
         except AttributeError:
-            is_supported_url_type = (url_type == 'upload')
+            is_supported_url_type = (url_type in ['upload', 'None'])
     else:
         is_supported_url_type = True
     return (is_supported_format or is_datastore_active) and user_has_access and is_supported_url_type
@@ -85,7 +85,19 @@ def xloader_badge(resource):
         # we do not know what the status is
         status = 'unknown'
 
-    messages = {
+    status_translations = {
+        # Default messages
+        'pending': toolkit._('Pending'),
+        'running': toolkit._('Running'),
+        'error': toolkit._('Error'),
+        # Debug messages
+        'complete': toolkit._('Complete'),
+        'active': toolkit._('Active'),
+        'inactive': toolkit._('Inactive'),
+        'unknown': toolkit._('Unknown'),
+    }
+
+    status_descriptions = {
         # Default messages
         'pending': toolkit._('Data awaiting load to DataStore'),
         'running': toolkit._('Loading data into DataStore'),
@@ -101,11 +113,8 @@ def xloader_badge(resource):
     if status not in basic_statuses and not toolkit.asbool(toolkit.config.get('ckanext.xloader.debug_badges', False)):
         return ''
 
-    badge_url = toolkit.h.url_for_static('/static/badges/{lang}/datastore-{status}.svg'.format(
-        lang=toolkit.h.lang(), status=status))
-
-    title = toolkit.h.render_datetime(xloader_job.get('last_updated'), with_hours=True) \
-        if xloader_job.get('last_updated') else ''
+    last_updated = toolkit.h.render_datetime(xloader_job.get('last_updated'), with_hours=True) \
+        if xloader_job.get('last_updated') else toolkit._('Last Updated Not Available')
 
     try:
         toolkit.check_access('resource_update', {'user': toolkit.g.user}, {'id': resource.get('id')})
@@ -113,13 +122,26 @@ def xloader_badge(resource):
                                        id=resource.get('package_id'),
                                        resource_id=resource.get('id'))
 
-        return Markup(u'<a href="{pusher_url}" class="loader-badge"><img src="{badge_url}" alt="{alt}" title="{title}"/></a>'.format(
+        return Markup(u'''
+    <a href="{pusher_url}" class="loader-badge" title="{title}: {status_description}" >
+        <span class="prefix">{prefix}</span>
+        <span class="status {status}">{status_display}</span>
+    </a>'''.format(
             pusher_url=pusher_url,
-            badge_url=badge_url,
-            alt=html_escape(messages[status], quote=True),
-            title=html_escape(title, quote=True)))
+            prefix=toolkit._('datastore'),
+            status=status,
+            status_display=html_escape(status_translations[status], quote=True),
+            status_description=html_escape(status_descriptions[status], quote=True),
+            title=html_escape(last_updated, quote=True)))
     except toolkit.NotAuthorized:
-        return Markup(u'<span class="loader-badge"><img src="{badge_url}" alt="{alt}" title="{title}"/></span>'.format(
-            badge_url=badge_url,
-            alt=html_escape(messages[status], quote=True),
-            title=html_escape(title, quote=True)))
+        return Markup(u'''
+    <span class="loader-badge" title="{title}: {status_description}">
+        <span class="prefix">{prefix}</span>
+        <span class="status {status}">{status_display}</span>
+    </span>
+    '''.format(
+            prefix=toolkit._('datastore'),
+            status=status,
+            status_display=html_escape(status_translations[status], quote=True),
+            status_description=html_escape(status_descriptions[status], quote=True),
+            title=html_escape(last_updated, quote=True)))
