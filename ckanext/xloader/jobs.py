@@ -18,7 +18,6 @@ from rq import get_current_job
 from rq.timeouts import JobTimeoutException
 import sqlalchemy as sa
 
-from ckan import model
 from ckan.plugins.toolkit import get_action, asbool, enqueue_job, ObjectNotFound, config, h
 
 from . import db, loader
@@ -467,7 +466,7 @@ def callback_xloader_hook(result_url, api_key, job_dict):
 
     try:
         result = requests.post(
-            modify_input_url(result_url), # modify with local config
+            modify_input_url(result_url),  # modify with local config
             data=json.dumps(job_dict, cls=DatetimeJsonEncoder),
             verify=SSL_VERIFY,
             headers=headers)
@@ -512,7 +511,6 @@ def _get_user_from_key(api_key_or_token):
     """ Gets the user using the API Token or API Key.
     """
     return get_user_from_token(api_key_or_token)
-
 
 
 def get_resource_and_dataset(resource_id, api_key):

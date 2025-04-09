@@ -123,20 +123,23 @@ def _clear_datastore_resource(resource_id):
         conn.execute(sa.text('TRUNCATE TABLE "{}" RESTART IDENTITY'.format(resource_id)))
 
 
-def load_csv(csv_filepath, resource_id, mimetype='text/csv', logger=None):
-    '''Loads a CSV into DataStore. Does not create the indexes.'''
-
-    decoding_result = detect_encoding(csv_filepath)
-    logger.info("load_csv: Decoded encoding: %s", decoding_result)
+def _read_metadata(table_filepath, mimetype, logger):
     # Determine the header row
+    logger.info('Determining column names and types')
+    decoding_result = detect_encoding(table_filepath)
+    logger.debug("Decoded encoding: %s", decoding_result)
     try:
-        file_format = os.path.splitext(csv_filepath)[1].strip('.')
-        with UnknownEncodingStream(csv_filepath, file_format, decoding_result) as stream:
+        file_format = os.path.splitext(table_filepath)[1].strip('.')
+        with UnknownEncodingStream(table_filepath, file_format, decoding_result,
+                                   skip_rows=[{'type': 'preset', 'value': 'blank'}],
+                                   post_parse=[TypeConverter().convert_types]) as stream:
             header_offset, headers = headers_guess(stream.sample)
     except TabulatorException:
         try:
             file_format = mimetype.lower().split('/')[-1]
-            with UnknownEncodingStream(csv_filepath, file_format, decoding_result) as stream:
+            with UnknownEncodingStream(table_filepath, file_format, decoding_result,
+                                       skip_rows=[{'type': 'preset', 'value': 'blank'}],
+                                       post_parse=[TypeConverter().convert_types]) as stream:
                 header_offset, headers = headers_guess(stream.sample)
         except TabulatorException as e:
             raise LoaderError('Tabulator error: {}'.format(e))
@@ -144,7 +147,38 @@ def load_csv(csv_filepath, resource_id, mimetype='text/csv', logger=None):
         raise FileCouldNotBeLoadedError(e)
 
     # Some headers might have been converted from strings to floats and such.
-    headers = encode_headers(headers)
+    return (
+        file_format,
+        decoding_result,
+        header_offset,
+        encode_headers(headers),
+        stream,
+    )
+
+
+def _read_existing_fields(resource_id):
+    # get column info from existing table
+    existing = datastore_resource_exists(resource_id)
+    if existing:
+        if p.toolkit.check_ckan_version(min_version='2.11'):
+            ds_info = p.toolkit.get_action('datastore_info')({'ignore_auth': True}, {'id': resource_id})
+            existing_fields = ds_info.get('fields', [])
+        else:
+            existing_fields = existing.get('fields', [])
+        existing_info = dict((f['id'], f['info'])
+                             for f in existing_fields
+                             if 'info' in f)
+        existing_fields_by_headers = dict((f['id'], f)
+                                          for f in existing_fields)
+        return (True, existing_info, existing_fields, existing_fields_by_headers)
+    else:
+        return (False, None, None, None)
+
+
+def load_csv(csv_filepath, resource_id, mimetype='text/csv', logger=None):
+    '''Loads a CSV into DataStore. Does not create the indexes.'''
+
+    file_format, decoding_result, header_offset, headers, stream = _read_metadata(csv_filepath, mimetype, logger)
 
     # Get the list of rows to skip. The rows in the tabulator stream are
     # numbered starting with 1.
@@ -157,10 +191,12 @@ def load_csv(csv_filepath, resource_id, mimetype='text/csv', logger=None):
         logger.warning('Could not determine delimiter from file, use default ","')
         delimiter = ','
 
+    # Strip leading and trailing whitespace, then truncate to maximum length,
+    # then strip again in case the truncation exposed a space.
     headers = [
         header.strip()[:MAX_COLUMN_LENGTH].strip()
         for header in headers
-        if header.strip()
+        if header and header.strip()
     ]
 
     # TODO worry about csv header name problems
@@ -172,24 +208,9 @@ def load_csv(csv_filepath, resource_id, mimetype='text/csv', logger=None):
     logger.info('Ensuring character coding is UTF8')
     f_write = tempfile.NamedTemporaryFile(suffix=file_format, delete=False)
     try:
-        # datastore db connection
-        engine = get_write_engine()
-
         # get column info from existing table
-        existing = datastore_resource_exists(resource_id)
-        existing_info = {}
+        existing, existing_info, existing_fields, existing_fields_by_headers = _read_existing_fields(resource_id)
         if existing:
-            if p.toolkit.check_ckan_version(min_version='2.11'):
-                ds_info = p.toolkit.get_action('datastore_info')({'ignore_auth': True}, {'id': resource_id})
-                existing_fields = ds_info.get('fields', [])
-            else:
-                existing_fields = existing.get('fields', [])
-            existing_info = dict((f['id'], f['info'])
-                                 for f in existing_fields
-                                 if 'info' in f)
-            existing_fields_by_headers = dict((f['id'], f)
-                                              for f in existing_fields)
-
             # Column types are either set (overridden) in the Data Dictionary page
             # or default to text type (which is robust)
             fields = [
@@ -280,6 +301,7 @@ def load_csv(csv_filepath, resource_id, mimetype='text/csv', logger=None):
         # datastore_active is switched on by datastore_create
         # TODO temporarily disable it until the load is complete
 
+        engine = get_write_engine()
         with engine.begin() as conn:
             _disable_fulltext_trigger(conn, resource_id)
 
@@ -383,44 +405,9 @@ def load_table(table_filepath, resource_id, mimetype='text/csv', logger=None):
     Largely copied from datapusher - see below. Is slower than load_csv.
     '''
 
-    # Determine the header row
-    logger.info('Determining column names and types')
-    decoding_result = detect_encoding(table_filepath)
-    logger.info("load_table: Decoded encoding: %s", decoding_result)
-    try:
-        file_format = os.path.splitext(table_filepath)[1].strip('.')
-        with UnknownEncodingStream(table_filepath, file_format, decoding_result,
-                                   skip_rows=[{'type': 'preset', 'value': 'blank'}],
-                                   post_parse=[TypeConverter().convert_types]) as stream:
-            header_offset, headers = headers_guess(stream.sample)
-    except TabulatorException:
-        try:
-            file_format = mimetype.lower().split('/')[-1]
-            with UnknownEncodingStream(table_filepath, file_format, decoding_result,
-                                       skip_rows=[{'type': 'preset', 'value': 'blank'}],
-                                       post_parse=[TypeConverter().convert_types]) as stream:
-                header_offset, headers = headers_guess(stream.sample)
-        except TabulatorException as e:
-            raise LoaderError('Tabulator error: {}'.format(e))
-    except Exception as e:
-        raise FileCouldNotBeLoadedError(e)
+    file_format, decoding_result, header_offset, headers, stream = _read_metadata(table_filepath, mimetype, logger)
 
-    existing = datastore_resource_exists(resource_id)
-    existing_info = None
-    if existing:
-        if p.toolkit.check_ckan_version(min_version='2.11'):
-            ds_info = p.toolkit.get_action('datastore_info')({'ignore_auth': True}, {'id': resource_id})
-            existing_fields = ds_info.get('fields', [])
-        else:
-            existing_fields = existing.get('fields', [])
-        existing_info = dict(
-            (f['id'], f['info'])
-            for f in existing_fields if 'info' in f)
-        existing_fields_by_headers = dict((f['id'], f)
-                                          for f in existing_fields)
-
-    # Some headers might have been converted from strings to floats and such.
-    headers = encode_headers(headers)
+    existing, existing_info, existing_fields, existing_fields_by_headers = _read_existing_fields(resource_id)
 
     # Get the list of rows to skip. The rows in the tabulator stream are
     # numbered starting with 1. We also want to skip the header row.
@@ -434,7 +421,7 @@ def load_table(table_filepath, resource_id, mimetype='text/csv', logger=None):
     fields = []
 
     # override with types user requested
-    if existing_info:
+    if existing:
         types = [
             {
                 'text': str,
@@ -485,7 +472,7 @@ def load_table(table_filepath, resource_id, mimetype='text/csv', logger=None):
                          for field in zip(headers, types)]
 
         # Maintain data dictionaries from matching column names
-        if existing_info:
+        if existing:
             for h in headers_dicts:
                 if h['id'] in existing_info:
                     h['info'] = existing_info[h['id']]
