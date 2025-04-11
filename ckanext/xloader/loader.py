@@ -175,8 +175,13 @@ def _read_existing_fields(resource_id):
         return (False, None, None, None)
 
 
-def load_csv(csv_filepath, resource_id, mimetype='text/csv', logger=None):
-    '''Loads a CSV into DataStore. Does not create the indexes.'''
+def load_csv(csv_filepath, resource_id, mimetype='text/csv', allow_type_guessing=False, logger=None):
+    '''Loads a CSV into DataStore. Does not create the indexes.
+
+    allow_type_guessing: Whether to fall back to Tabulator type-guessing
+    in the event that the resource already existed but its structure has
+    changed.
+    '''
 
     file_format, decoding_result, header_offset, headers, stream = _read_metadata(csv_filepath, mimetype, logger)
 
@@ -239,6 +244,9 @@ def load_csv(csv_filepath, resource_id, mimetype='text/csv', logger=None):
             else:
                 logger.info('Deleting "%s" from DataStore.', resource_id)
                 delete_datastore_resource(resource_id)
+                if allow_type_guessing:
+                    # file structure has changed, need to re-guess types
+                    raise LoaderError("File structure has changed, reverting to Tabulator")
         else:
             fields = [
                 {'id': header_name,
