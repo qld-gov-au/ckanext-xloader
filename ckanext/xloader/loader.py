@@ -5,7 +5,6 @@ import datetime
 import itertools
 from six import text_type as str, binary_type
 import os
-import os.path
 import tempfile
 from decimal import Decimal
 
@@ -212,160 +211,158 @@ def load_csv(csv_filepath, resource_id, mimetype='text/csv', allow_type_guessing
     # to one that pgloader will understand.
     logger.info('Ensuring character coding is UTF8')
     f_write = tempfile.NamedTemporaryFile(suffix=file_format, delete=False)
-    try:
-        # get column info from existing table
-        existing, existing_info, existing_fields, existing_fields_by_headers = _read_existing_fields(resource_id)
-        if existing:
-            # Column types are either set (overridden) in the Data Dictionary page
-            # or default to text type (which is robust)
-            fields = [
-                {'id': header_name,
-                 'type': existing_info.get(header_name, {})
-                    .get('type_override') or 'text',
-                 }
-                for header_name in headers]
 
-            # Maintain data dictionaries from matching column names
-            for f in fields:
-                if f['id'] in existing_info:
-                    f['info'] = existing_info[f['id']]
-                    f['strip_extra_white'] = existing_info[f['id']].get('strip_extra_white') if 'strip_extra_white' in existing_info[f['id']] \
-                        else existing_fields_by_headers[f['id']].get('strip_extra_white', True)
+    # get column info from existing table
+    existing, existing_info, existing_fields, existing_fields_by_headers = _read_existing_fields(resource_id)
+    if existing:
+        # Column types are either set (overridden) in the Data Dictionary page
+        # or default to text type (which is robust)
+        fields = [
+            {'id': header_name,
+             'type': existing_info.get(header_name, {})
+                .get('type_override') or 'text',
+             }
+            for header_name in headers]
 
-            '''
-            Delete or truncate existing datastore table before proceeding,
-            depending on whether any fields have changed.
-            Otherwise the COPY will append to the existing table.
-            And if the fields have significantly changed, it may also fail.
-            '''
-            if _fields_match(fields, existing_fields, logger):
-                logger.info('Clearing records for "%s" from DataStore.', resource_id)
-                _clear_datastore_resource(resource_id)
-            else:
-                logger.info('Deleting "%s" from DataStore.', resource_id)
-                delete_datastore_resource(resource_id)
-                if allow_type_guessing:
-                    # file structure has changed, need to re-guess types
-                    raise LoaderError("File structure has changed, reverting to Tabulator")
+        # Maintain data dictionaries from matching column names
+        for f in fields:
+            if f['id'] in existing_info:
+                f['info'] = existing_info[f['id']]
+                f['strip_extra_white'] = existing_info[f['id']].get('strip_extra_white') if 'strip_extra_white' in existing_info[f['id']] \
+                    else existing_fields_by_headers[f['id']].get('strip_extra_white', True)
+
+        '''
+        Delete or truncate existing datastore table before proceeding,
+        depending on whether any fields have changed.
+        Otherwise the COPY will append to the existing table.
+        And if the fields have significantly changed, it may also fail.
+        '''
+        if _fields_match(fields, existing_fields, logger):
+            logger.info('Clearing records for "%s" from DataStore.', resource_id)
+            _clear_datastore_resource(resource_id)
         else:
-            fields = [
-                {'id': header_name,
-                 'type': 'text',
-                 'strip_extra_white': True}
-                for header_name in headers]
+            logger.info('Deleting "%s" from DataStore.', resource_id)
+            delete_datastore_resource(resource_id)
+            if allow_type_guessing:
+                # file structure has changed, need to re-guess types
+                raise LoaderError("File structure has changed, reverting to Tabulator")
+    else:
+        fields = [
+            {'id': header_name,
+             'type': 'text',
+             'strip_extra_white': True}
+            for header_name in headers]
 
-        logger.info('Fields: %s', fields)
+    logger.info('Fields: %s', fields)
 
-        def _make_whitespace_stripping_iter(super_iter):
-            def strip_white_space_iter():
-                for row in super_iter():
-                    if len(row) == len(fields):
-                        for _index, _cell in enumerate(row):
-                            # only strip white space if strip_extra_white is True
-                            if fields[_index].get('strip_extra_white', True) and isinstance(_cell, str):
-                                row[_index] = _cell.strip()
-                    yield row
-            return strip_white_space_iter
+    def _make_whitespace_stripping_iter(super_iter):
+        def strip_white_space_iter():
+            for row in super_iter():
+                if len(row) == len(fields):
+                    for _index, _cell in enumerate(row):
+                        # only strip white space if strip_extra_white is True
+                        if fields[_index].get('strip_extra_white', True) and isinstance(_cell, str):
+                            row[_index] = _cell.strip()
+                yield row
+        return strip_white_space_iter
 
-        save_args = {'target': f_write.name, 'format': 'csv', 'encoding': 'utf-8', 'delimiter': delimiter}
+    save_args = {'target': f_write.name, 'format': 'csv', 'encoding': 'utf-8', 'delimiter': delimiter}
+    try:
+        with UnknownEncodingStream(csv_filepath, file_format, decoding_result,
+                                   skip_rows=skip_rows) as stream:
+            stream.iter = _make_whitespace_stripping_iter(stream.iter)
+            stream.save(**save_args)
+    except (EncodingError, UnicodeDecodeError):
+        with Stream(csv_filepath, format=file_format, encoding=SINGLE_BYTE_ENCODING,
+                    skip_rows=skip_rows) as stream:
+            stream.iter = _make_whitespace_stripping_iter(stream.iter)
+            stream.save(**save_args)
+    csv_filepath = f_write.name
+
+    # Create table
+    from ckan import model
+    context = {'model': model, 'ignore_auth': True}
+    data_dict = dict(
+        resource_id=resource_id,
+        fields=fields,
+    )
+    data_dict['records'] = None  # just create an empty table
+    data_dict['force'] = True  # TODO check this - I don't fully
+    # understand read-only/datastore resources
+    try:
+        p.toolkit.get_action('datastore_create')(context, data_dict)
+    except p.toolkit.ValidationError as e:
+        if 'fields' in e.error_dict:
+            # e.g. {'message': None, 'error_dict': {'fields': [u'"***" is not a valid field name']}, '_error_summary': None}  # noqa
+            error_message = e.error_dict['fields'][0]
+            raise LoaderError('Error with field definition: {}'
+                              .format(error_message))
+        else:
+            raise LoaderError(
+                'Validation error when creating the database table: {}'
+                .format(str(e)))
+    except Exception as e:
+        raise LoaderError('Could not create the database table: {}'
+                          .format(e))
+
+    # datastore_active is switched on by datastore_create
+    # TODO temporarily disable it until the load is complete
+
+    engine = get_write_engine()
+    with engine.begin() as conn:
+        _disable_fulltext_trigger(conn, resource_id)
+
+    with engine.begin() as conn:
+        context['connection'] = conn
+        _drop_indexes(context, data_dict, False)
+
+    logger.info('Copying to database...')
+
+    # Options for loading into postgres:
+    # 1. \copy - can't use as that is a psql meta-command and not accessible
+    #    via psycopg2
+    # 2. COPY - requires the db user to have superuser privileges. This is
+    #    dangerous. It is also not available on AWS, for example.
+    # 3. pgloader method? - as described in its docs:
+    #    Note that while the COPY command is restricted to read either from
+    #    its standard input or from a local file on the server's file system,
+    #    the command line tool psql implements a \copy command that knows
+    #    how to stream a file local to the client over the network and into
+    #    the PostgreSQL server, using the same protocol as pgloader uses.
+    # 4. COPY FROM STDIN - not quite as fast as COPY from a file, but avoids
+    #    the superuser issue. <-- picked
+
+    with engine.begin() as conn:
+        cur = conn.connection.cursor()
         try:
-            with UnknownEncodingStream(csv_filepath, file_format, decoding_result,
-                                       skip_rows=skip_rows) as stream:
-                stream.iter = _make_whitespace_stripping_iter(stream.iter)
-                stream.save(**save_args)
-        except (EncodingError, UnicodeDecodeError):
-            with Stream(csv_filepath, format=file_format, encoding=SINGLE_BYTE_ENCODING,
-                        skip_rows=skip_rows) as stream:
-                stream.iter = _make_whitespace_stripping_iter(stream.iter)
-                stream.save(**save_args)
-        csv_filepath = f_write.name
+            with open(csv_filepath, 'rb') as f:
+                # can't use :param for table name because params are only
+                # for filter values that are single quoted.
+                try:
+                    cur.copy_expert(
+                        "COPY \"{resource_id}\" ({column_names}) "
+                        "FROM STDIN "
+                        "WITH (DELIMITER '{delimiter}', FORMAT csv, HEADER 1, "
+                        "      ENCODING '{encoding}');"
+                        .format(
+                            resource_id=resource_id,
+                            column_names=', '.join(['"{}"'.format(h)
+                                                    for h in headers]),
+                            delimiter=delimiter,
+                            encoding='UTF8',
+                        ),
+                        f)
+                except psycopg2.DataError as e:
+                    # e is a str but with foreign chars e.g.
+                    # 'extra data: "paul,pa\xc3\xbcl"\n'
+                    # but logging and exceptions need a normal (7 bit) str
+                    error_str = str(e)
+                    logger.warning(error_str)
+                    raise LoaderError('Error during the load into PostgreSQL:'
+                                      ' {}'.format(error_str))
 
-        # Create table
-        from ckan import model
-        context = {'model': model, 'ignore_auth': True}
-        data_dict = dict(
-            resource_id=resource_id,
-            fields=fields,
-        )
-        data_dict['records'] = None  # just create an empty table
-        data_dict['force'] = True  # TODO check this - I don't fully
-        # understand read-only/datastore resources
-        try:
-            p.toolkit.get_action('datastore_create')(context, data_dict)
-        except p.toolkit.ValidationError as e:
-            if 'fields' in e.error_dict:
-                # e.g. {'message': None, 'error_dict': {'fields': [u'"***" is not a valid field name']}, '_error_summary': None}  # noqa
-                error_message = e.error_dict['fields'][0]
-                raise LoaderError('Error with field definition: {}'
-                                  .format(error_message))
-            else:
-                raise LoaderError(
-                    'Validation error when creating the database table: {}'
-                    .format(str(e)))
-        except Exception as e:
-            raise LoaderError('Could not create the database table: {}'
-                              .format(e))
-
-        # datastore_active is switched on by datastore_create
-        # TODO temporarily disable it until the load is complete
-
-        engine = get_write_engine()
-        with engine.begin() as conn:
-            _disable_fulltext_trigger(conn, resource_id)
-
-        with engine.begin() as conn:
-            context['connection'] = conn
-            _drop_indexes(context, data_dict, False)
-
-        logger.info('Copying to database...')
-
-        # Options for loading into postgres:
-        # 1. \copy - can't use as that is a psql meta-command and not accessible
-        #    via psycopg2
-        # 2. COPY - requires the db user to have superuser privileges. This is
-        #    dangerous. It is also not available on AWS, for example.
-        # 3. pgloader method? - as described in its docs:
-        #    Note that while the COPY command is restricted to read either from
-        #    its standard input or from a local file on the server's file system,
-        #    the command line tool psql implements a \copy command that knows
-        #    how to stream a file local to the client over the network and into
-        #    the PostgreSQL server, using the same protocol as pgloader uses.
-        # 4. COPY FROM STDIN - not quite as fast as COPY from a file, but avoids
-        #    the superuser issue. <-- picked
-
-        with engine.begin() as conn:
-            cur = conn.connection.cursor()
-            try:
-                with open(csv_filepath, 'rb') as f:
-                    # can't use :param for table name because params are only
-                    # for filter values that are single quoted.
-                    try:
-                        cur.copy_expert(
-                            "COPY \"{resource_id}\" ({column_names}) "
-                            "FROM STDIN "
-                            "WITH (DELIMITER '{delimiter}', FORMAT csv, HEADER 1, "
-                            "      ENCODING '{encoding}');"
-                            .format(
-                                resource_id=resource_id,
-                                column_names=', '.join(['"{}"'.format(h)
-                                                        for h in headers]),
-                                delimiter=delimiter,
-                                encoding='UTF8',
-                            ),
-                            f)
-                    except psycopg2.DataError as e:
-                        # e is a str but with foreign chars e.g.
-                        # 'extra data: "paul,pa\xc3\xbcl"\n'
-                        # but logging and exceptions need a normal (7 bit) str
-                        error_str = str(e)
-                        logger.warning(error_str)
-                        raise LoaderError('Error during the load into PostgreSQL:'
-                                          ' {}'.format(error_str))
-
-            finally:
-                cur.close()
-    finally:
-        os.remove(csv_filepath)  # i.e. the tempfile
+        finally:
+            cur.close()
 
     logger.info('...copying done')
 
