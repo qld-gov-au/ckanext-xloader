@@ -714,16 +714,16 @@ def _populate_fulltext(connection, resource_id, fields, logger):
                         # Concatenate all user columns (excluding system columns starting with '_')
                         # coalesce() handles NULL values by converting them to empty strings
                         cols=" || ' ' || ".join(
-                'coalesce({}, \'\')'.format(
-                    identifier(field['id'])
+                            'coalesce({}, \'\')'.format(
+                                identifier(field['id'])
                                 + ('::text' if field['type'] != 'text' else '')  # Cast non-text types
-                )
-                for field in fields
-                            if not field['id'].startswith('_')  # Skip system columns like _id, _full_text
+                            )
+                            # Skip system columns like _id, _full_text
+                            for field in fields if not field['id'].startswith('_')
                         ),
                         first=start,
                         end=start + chunks
-            )
+                    )
                 connection.execute(sql)
                 logger.info("Indexed rows {first} to {end} of {total}".format(
                     first=start, end=min(start + chunks, rows_count), total=rows_count))

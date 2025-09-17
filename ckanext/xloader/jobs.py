@@ -438,7 +438,7 @@ def _download_resource_data(resource, data, api_key, logger):
     except requests.exceptions.Timeout:
         logger.warning('URL time out after %ss', DOWNLOAD_TIMEOUT)
         raise XLoaderTimeoutError('Connection timed out after {}s'.format(
-                       DOWNLOAD_TIMEOUT))
+                                  DOWNLOAD_TIMEOUT))
     except requests.exceptions.RequestException as e:
         tmp_file.close()
         try:
