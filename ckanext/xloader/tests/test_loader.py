@@ -728,7 +728,8 @@ class TestLoadCsv(TestLoadBase):
         )
 
         with pytest.raises(LoaderError):
-            # Load a file with different structure
+            # Loading a file with different structure should trigger an error
+            # so we fall back to Tabulator
             loader.load_csv(
                 get_sample_filepath("simple-with-extra-column.csv"),
                 resource_id=resource_id,

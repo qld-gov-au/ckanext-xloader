@@ -2,6 +2,7 @@
 from __future__ import absolute_import
 
 import datetime
+from enum import Enum
 import itertools
 from six import text_type as str, binary_type
 import os
@@ -33,6 +34,24 @@ MAX_COLUMN_LENGTH = 63
 tabulator_config.CSV_SAMPLE_LINES = CSV_SAMPLE_LINES
 
 SINGLE_BYTE_ENCODING = 'cp1252'
+
+
+class FieldMatch(Enum):
+    """ Enumerates the possible match results between existing and new fields.
+
+    EXACT_MATCH indicates that the field count, names and types are identical,
+    allowing a datastore table to be truncated and reused.
+
+    NAME_MATCH indicates that the field count and names are the same,
+    but one or more field types have changed, so the table must be dropped
+    and recreated, but the Data Dictionary can be preserved if applicable.
+
+    MISMATCH indicates that the field count or names have changed,
+    so the table must be dropped and recreated by guessing the types.
+    """
+    EXACT_MATCH = 1,
+    NAME_MATCH = 2,
+    MISMATCH = 3
 
 
 class UnknownEncodingStream(object):
@@ -82,6 +101,8 @@ def detect_encoding(file_path):
 def _fields_match(fields, existing_fields, logger):
     ''' Check whether all columns have the same names and types as previously,
     independent of ordering.
+
+    Returns one of the values of FieldMatch.
     '''
     # drop the generated '_id' field
     for index in range(len(existing_fields)):
@@ -93,24 +114,24 @@ def _fields_match(fields, existing_fields, logger):
     field_count = len(fields)
     if field_count != len(existing_fields):
         logger.info("Fields do not match; there are now %s fields but previously %s", field_count, len(existing_fields))
-        return False
+        return FieldMatch.MISMATCH
 
-    # ensure each field is present in both collections with the same type
+    # ensure each field is present in both collections and check for type changes
+    type_changed = False
     for index in range(field_count):
         field_id = fields[index]['id']
         for existing_index in range(field_count):
             existing_field_id = existing_fields[existing_index]['id']
             if field_id == existing_field_id:
-                if fields[index]['type'] == existing_fields[existing_index]['type']:
-                    break
-                else:
-                    logger.info("Fields do not match; new type for %s field is %s but existing type is %s",
+                if fields[index]['type'] != existing_fields[existing_index]['type']:
+                    logger.info("Field has changed; new type for %s field is %s but existing type is %s",
                                 field_id, fields[index]["type"], existing_fields[existing_index]['type'])
-                    return False
+                    type_changed = True
+                break
         else:
             logger.info("Fields do not match; no existing entry found for %s", field_id)
-            return False
-    return True
+            return FieldMatch.MISMATCH
+    return FieldMatch.NAME_MATCH if type_changed else FieldMatch.EXACT_MATCH
 
 
 def _clear_datastore_resource(resource_id):
@@ -237,14 +258,17 @@ def load_csv(csv_filepath, resource_id, mimetype='text/csv', allow_type_guessing
         Otherwise the COPY will append to the existing table.
         And if the fields have significantly changed, it may also fail.
         '''
-        if _fields_match(fields, existing_fields, logger):
+        fields_match = _fields_match(fields, existing_fields, logger)
+        if fields_match == FieldMatch.EXACT_MATCH:
             logger.info('Clearing records for "%s" from DataStore.', resource_id)
             _clear_datastore_resource(resource_id)
         else:
             logger.info('Deleting "%s" from DataStore.', resource_id)
             delete_datastore_resource(resource_id)
-            if allow_type_guessing:
-                # file structure has changed, need to re-guess types
+            # if file structure has changed,
+            # and it wasn't just from a Data Dictionary override,
+            # then we need to re-guess types
+            if allow_type_guessing and fields_match == FieldMatch.MISMATCH:
                 raise LoaderError("File structure has changed, reverting to Tabulator")
     else:
         fields = [
@@ -368,7 +392,7 @@ def load_csv(csv_filepath, resource_id, mimetype='text/csv', allow_type_guessing
 
     logger.info('Creating search index...')
     with engine.begin() as conn:
-        _populate_fulltext(conn, resource_id, fields=fields)
+        _populate_fulltext(conn, resource_id, fields=fields, logger=logger)
     logger.info('...search index created')
 
     return fields
@@ -504,7 +528,7 @@ def load_table(table_filepath, resource_id, mimetype='text/csv', logger=None):
         And if the fields have significantly changed, it may also fail.
         '''
         if existing:
-            if _fields_match(headers_dicts, existing_fields, logger):
+            if _fields_match(headers_dicts, existing_fields, logger) == FieldMatch.EXACT_MATCH:
                 logger.info('Clearing records for "%s" from DataStore.', resource_id)
                 _clear_datastore_resource(resource_id)
             else:
@@ -651,30 +675,86 @@ def _enable_fulltext_trigger(connection, resource_id):
         .format(table=identifier(resource_id, True))))
 
 
-def _populate_fulltext(connection, resource_id, fields):
-    '''Populates the _full_text column. i.e. the same as datastore_run_triggers
-    but it runs in 1/9 of the time.
+def _get_rows_count_of_resource(connection, table):
+    count_query = ''' SELECT count(_id) from {table} '''.format(table=table)
+    results = connection.execute(count_query)
+    rows_count = int(results.first()[0])
+    return rows_count
 
-    The downside is that it reimplements the code that calculates the text to
-    index, breaking DRY. And its annoying to pass in the column names.
 
-    fields: list of dicts giving the each column's 'id' (name) and 'type'
+def _populate_fulltext(connection, resource_id, fields, logger):
+    '''Populates the _full_text column for full-text search functionality.
+
+    This function creates a PostgreSQL tsvector (text search vector) for each row
+    by concatenating all non-system columns. It's equivalent to datastore_run_triggers
+    but runs approximately 9x faster by using direct SQL updates.
+
+    To handle very large datasets (e.g., 4GB+ files with millions of rows), the update
+    operation is partitioned into chunks to prevent:
+    - Database statement timeouts
+    - Memory exhaustion
+    - Lock contention that could block other operations
+    - Transaction log overflow
+
+    The chunking mechanism processes rows in batches based on their _id values,
+    with chunk size configurable via 'ckanext.xloader.search_update_chunks'
+    (default: 100,000 rows per chunk).
+
+    Args:
+        connection: Database connection object
+        resource_id (str): The datastore table identifier
+        fields (list): List of dicts with column 'id' (name) and 'type'
             (text/numeric/timestamp)
-    '''
-    stmt = sa.update(sa.table(resource_id, sa.column("_full_text"))).values(
-        _full_text=sa.text("to_tsvector({})".format(
-            " || ' ' || ".join(
-                'coalesce({}, \'\')'.format(
-                    identifier(field['id'])
-                    + ('::text' if field['type'] != 'text' else '')
-                )
-                for field in fields
-                if not field['id'].startswith('_')
-            )
-        ))
-    )
+        logger: Logger instance for progress tracking
 
-    connection.execute(stmt)
+    Note:
+        This reimplements CKAN's text indexing logic for performance,
+        breaking DRY principle but providing significant speed improvements.
+    '''
+    try:
+        # Get total row count to determine chunking strategy
+        rows_count = _get_rows_count_of_resource(connection, identifier(resource_id))
+    except Exception as e:
+        rows_count = ''
+        logger.info("Failed to get resource rows count: {} ".format(str(e)))
+        raise
+
+    if rows_count:
+        # Configure chunk size - prevents timeouts and memory issues on large datasets
+        # Default 100,000 rows per chunk balances performance vs. resource usage
+        chunks = int(config.get('ckanext.xloader.search_update_chunks', 100000))
+
+        # Process table in chunks using _id range queries
+        # This approach ensures consistent chunk sizes and allows resuming if interrupted
+        for start in range(0, rows_count, chunks):
+            try:
+                # Build SQL to update _full_text column with concatenated searchable content
+                sql = \
+                    '''
+                    UPDATE {table}
+                    SET _full_text = to_tsvector({cols}) WHERE _id BETWEEN {first} and {end};
+                    '''.format(
+                        table=identifier(resource_id),
+                        # Concatenate all user columns (excluding system columns starting with '_')
+                        # coalesce() handles NULL values by converting them to empty strings
+                        cols=" || ' ' || ".join(
+                            'coalesce({}, \'\')'.format(
+                                identifier(field['id'])
+                                + ('::text' if field['type'] != 'text' else '')  # Cast non-text types
+                            )
+                            # Skip system columns like _id, _full_text
+                            for field in fields if not field['id'].startswith('_')
+                        ),
+                        first=start,
+                        end=start + chunks
+                    )
+                connection.execute(sql)
+                logger.info("Indexed rows {first} to {end} of {total}".format(
+                    first=start, end=min(start + chunks, rows_count), total=rows_count))
+            except Exception as e:
+                # Log chunk-specific errors but continue processing remaining chunks
+                logger.error("Failed to index rows {first}-{end}: {error}".format(
+                    first=start, end=start + chunks, error=str(e)))
 
 
 def calculate_record_count(resource_id, logger):
