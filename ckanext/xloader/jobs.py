@@ -46,7 +46,7 @@ RETRYABLE_ERRORS = (
     errors.LockNotAvailable,
     errors.ObjectInUse,
     HTTPError,
-    XLoaderTimeoutError 
+    XLoaderTimeoutError
 )
 # Retries can only occur in cases where the datastore entry exists,
 # so use the standard timeout
@@ -57,29 +57,28 @@ APITOKEN_HEADER_NAME = config.get('apitoken_header_name', 'Authorization')
 def is_retryable_error(error):
     """
     Determine if an error should trigger a retry attempt.
-    
+
     Checks if the error is a temporary/transient condition that might
     succeed on retry. Returns True for retryable HTTP status codes and
     other temporary errors.
-    
+
     Retryable HTTP status codes:
     - 408 Request Timeout
-    - 429 Too Many Requests  
-    - 500 Internal Server Error
-    - 502 Bad Gateway 
+    - 429 Too Many Requests
+    - 502 Bad Gateway
     - 503 Service Unavailable
     - 504 Gateway Timeout
     - 507 Insufficient Storage
     - 522 Connection Timed Out (Cloudflare)
     - 524 A Timeout Occurred (Cloudflare)
-    
+
     :param error: Exception object to check
     :type error: Exception
     :return: True if error should be retried, False otherwise
     :rtype: bool
     """
     if isinstance(error, HTTPError):
-        retryable_status_codes = {408, 429, 500, 502, 503, 504, 507, 522, 524}
+        retryable_status_codes = {408, 429, 502, 503, 504, 507, 522, 524}
         return error.status_code in retryable_status_codes
     else:
         return True
@@ -163,11 +162,11 @@ def xloader_data_into_datastore(input):
 def handle_retryable_error(e, input, job_id, job_dict, logger, error_state):
     """
     Handle retryable errors by attempting to retry the job or marking it as failed.
-    
+
     Checks if the error is retryable (database deadlocks, HTTP timeouts, etc.) and
     within the retry limit. If so, enqueues a new job attempt. Otherwise, marks
     the job as errored.
-    
+
     :param e: The exception that occurred
     :type e: Exception
     :param input: Job input data containing metadata and API key
@@ -180,7 +179,7 @@ def handle_retryable_error(e, input, job_id, job_dict, logger, error_state):
     :type logger: logging.Logger
     :param error_state: Mutable dict to track error state {'errored': bool}
     :type error_state: dict
-    
+
     :returns: True if job was retried, None otherwise
     :rtype: bool or None
     """

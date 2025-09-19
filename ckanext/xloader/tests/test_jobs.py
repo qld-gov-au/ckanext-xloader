@@ -203,13 +203,12 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
     @pytest.mark.parametrize("error_type,should_retry", [
         # Retryable errors from RETRYABLE_ERRORS
         ("DeadlockDetected", True),
-        ("LockNotAvailable", True), 
+        ("LockNotAvailable", True),
         ("ObjectInUse", True),
         ("XLoaderTimeoutError", True),
         # Retryable HTTP errors (status codes from is_retryable_error)
         ("HTTPError_408", True),
         ("HTTPError_429", True),
-        ("HTTPError_500", True),
         ("HTTPError_502", True),
         ("HTTPError_503", True),
         ("HTTPError_504", True),
@@ -220,13 +219,14 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
         ("HTTPError_400", False),
         ("HTTPError_404", False),
         ("HTTPError_403", False),
+        ("HTTPError_500", False),
         # Other non-retryable errors (not in RETRYABLE_ERRORS)
         ("ValueError", False),
         ("TypeError", False),
     ])
     def test_retry_behavior(self, cli, data, error_type, should_retry):
         """Test retry behavior for different error types."""
-        
+
         def create_mock_error(error_type):
             if error_type == "DeadlockDetected":
                 from psycopg2 import errors
@@ -246,12 +246,12 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
                 return ValueError("Test error")
             elif error_type == "TypeError":
                 return TypeError("Test error")
-        
+
         def mock_download_with_error(*args, **kwargs):
             if not hasattr(mock_download_with_error, 'call_count'):
                 mock_download_with_error.call_count = 0
             mock_download_with_error.call_count += 1
-            
+
             if mock_download_with_error.call_count == 1:
                 # First call - raise the test error
                 raise create_mock_error(error_type)
@@ -265,12 +265,12 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
             else:
                 # Non-retryable errors should not get a second chance
                 raise create_mock_error(error_type)
-        
+
         self.enqueue(jobs.xloader_data_into_datastore, [data])
-        
+
         with mock.patch("ckanext.xloader.jobs._download_resource_data", mock_download_with_error):
             stdout = cli.invoke(ckan, ["jobs", "worker", "--burst"]).output
-            
+
             if should_retry:
                 # Check that retry was attempted
                 assert "Job failed due to temporary error" in stdout
