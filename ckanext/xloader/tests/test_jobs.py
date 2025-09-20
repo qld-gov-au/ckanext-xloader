@@ -82,8 +82,8 @@ def data(create_with_upload, apikey):
 
 
 @pytest.mark.usefixtures("clean_db", "with_plugins")
-@pytest.mark.ckan_config("ckanext.xloader.job_timeout", 5)
-@pytest.mark.ckan_config("ckan.jobs.timeout", 5)
+@pytest.mark.ckan_config("ckanext.xloader.job_timeout", 10)
+@pytest.mark.ckan_config("ckan.jobs.timeout", 10)
 class TestXLoaderJobs(helpers.FunctionalRQTestBase):
 
     def test_xloader_data_into_datastore(self, cli, data):

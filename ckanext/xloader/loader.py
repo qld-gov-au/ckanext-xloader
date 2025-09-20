@@ -340,7 +340,7 @@ def load_csv(csv_filepath, resource_id, mimetype='text/csv', allow_type_guessing
         context['connection'] = conn
         _drop_indexes(context, data_dict, False)
 
-    logger.info('Copying to database...')
+    logger.info('load_csv: Copying to database...')
 
     # Options for loading into postgres:
     # 1. \copy - can't use as that is a psql meta-command and not accessible
@@ -535,7 +535,7 @@ def load_table(table_filepath, resource_id, mimetype='text/csv', logger=None):
                 logger.info('Deleting "%s" from datastore.', resource_id)
                 delete_datastore_resource(resource_id)
 
-        logger.info('Copying to database...')
+        logger.info('load_table: Copying to database...')
         count = 0
         # Some types cannot be stored as empty strings and must be converted to None,
         # https://github.com/ckan/ckanext-xloader/issues/182
