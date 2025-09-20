@@ -89,7 +89,8 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
     def test_xloader_data_into_datastore(self, cli, data):
         self.enqueue(jobs.xloader_data_into_datastore, [data])
         with mock.patch("ckanext.xloader.jobs.get_response", get_response):
-            stdout = cli.invoke(ckan, ["jobs", "worker", "--burst"]).output
+            result = cli.invoke(ckan, ["jobs", "worker", "--burst"])
+            stdout = result.output + result.stderr
             assert "File hash: d44fa65eda3675e11710682fdb5f1648" in stdout
             assert "Fields: [{'id': 'x', 'type': 'text', 'strip_extra_white': True}, {'id': 'y', 'type': 'text', 'strip_extra_white': True}]" in stdout
             assert "Copying to database..." in stdout
@@ -106,7 +107,8 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
         data['metadata']['original_url'] = 'http://xloader-site-url/resource.csv'
         self.enqueue(jobs.xloader_data_into_datastore, [data])
         with mock.patch("ckanext.xloader.jobs.get_response", get_response):
-            stdout = cli.invoke(ckan, ["jobs", "worker", "--burst"]).output
+            result = cli.invoke(ckan, ["jobs", "worker", "--burst"])
+            stdout = result.output + result.stderr
             assert "Express Load completed" in stdout
 
         resource = helpers.call_action("resource_show", id=data["metadata"]["resource_id"])
@@ -117,7 +119,8 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
         data['metadata']['original_url'] = 'http://ckan-site-url/resource.csv'
         self.enqueue(jobs.xloader_data_into_datastore, [data])
         with mock.patch("ckanext.xloader.jobs.get_response", get_response):
-            stdout = cli.invoke(ckan, ["jobs", "worker", "--burst"]).output
+            result = cli.invoke(ckan, ["jobs", "worker", "--burst"])
+            stdout = result.output + result.stderr
             assert "Express Load completed" in stdout
 
         resource = helpers.call_action("resource_show", id=data["metadata"]["resource_id"])
@@ -128,7 +131,8 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
         data['metadata']['original_url'] = 'http://external-site-url/resource.csv'
         self.enqueue(jobs.xloader_data_into_datastore, [data])
         with mock.patch("ckanext.xloader.jobs.get_response", get_response):
-            stdout = cli.invoke(ckan, ["jobs", "worker", "--burst"]).output
+            result = cli.invoke(ckan, ["jobs", "worker", "--burst"])
+            stdout = result.output + result.stderr
             assert "Express Load completed" in stdout
 
         resource = helpers.call_action("resource_show", id=data["metadata"]["resource_id"])
@@ -139,7 +143,8 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
         data['result_url'] = 'http://xloader-site-url/api/3/action/xloader_hook'
         self.enqueue(jobs.xloader_data_into_datastore, [data])
         with mock.patch("ckanext.xloader.jobs.get_response", get_response):
-            stdout = cli.invoke(ckan, ["jobs", "worker", "--burst"]).output
+            result = cli.invoke(ckan, ["jobs", "worker", "--burst"])
+            stdout = result.output + result.stderr
             assert "Express Load completed" in stdout
 
         resource = helpers.call_action("resource_show", id=data["metadata"]["resource_id"])
@@ -150,7 +155,8 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
         data['result_url'] = 'http://ckan-site-url/api/3/action/xloader_hook'
         self.enqueue(jobs.xloader_data_into_datastore, [data])
         with mock.patch("ckanext.xloader.jobs.get_response", get_response):
-            stdout = cli.invoke(ckan, ["jobs", "worker", "--burst"]).output
+            result = cli.invoke(ckan, ["jobs", "worker", "--burst"])
+            stdout = result.output + result.stderr
             assert "Express Load completed" in stdout
 
         resource = helpers.call_action("resource_show", id=data["metadata"]["resource_id"])
@@ -159,32 +165,37 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
     def test_xloader_ignore_hash(self, cli, data):
         self.enqueue(jobs.xloader_data_into_datastore, [data])
         with mock.patch("ckanext.xloader.jobs.get_response", get_response):
-            stdout = cli.invoke(ckan, ["jobs", "worker", "--burst"]).output
+            result = cli.invoke(ckan, ["jobs", "worker", "--burst"])
+            stdout = result.output + result.stderr
             assert "Express Load completed" in stdout
 
         self.enqueue(jobs.xloader_data_into_datastore, [data])
         with mock.patch("ckanext.xloader.jobs.get_response", get_response):
-            stdout = cli.invoke(ckan, ["jobs", "worker", "--burst"]).output
+            result = cli.invoke(ckan, ["jobs", "worker", "--burst"])
+            stdout = result.output + result.stderr
             assert "Copying to database..." in stdout
             assert "Express Load completed" in stdout
 
         data["metadata"]["ignore_hash"] = False
         self.enqueue(jobs.xloader_data_into_datastore, [data])
         with mock.patch("ckanext.xloader.jobs.get_response", get_response):
-            stdout = cli.invoke(ckan, ["jobs", "worker", "--burst"]).output
+            result = cli.invoke(ckan, ["jobs", "worker", "--burst"])
+            stdout = result.output + result.stderr
             assert "Ignoring resource - the file hash hasn't changed" in stdout
 
     def test_data_too_big_error_if_content_length_bigger_than_config(self, cli, data):
         self.enqueue(jobs.xloader_data_into_datastore, [data])
         with mock.patch("ckanext.xloader.jobs.get_response", get_large_response):
-            stdout = cli.invoke(ckan, ["jobs", "worker", "--burst"]).output
+            result = cli.invoke(ckan, ["jobs", "worker", "--burst"])
+            stdout = result.output + result.stderr
             assert "Data too large to load into Datastore:" in stdout
 
     def test_data_max_excerpt_lines_config(self, cli, data):
         self.enqueue(jobs.xloader_data_into_datastore, [data])
         with mock.patch("ckanext.xloader.jobs.get_response", get_large_response):
             with mock.patch("ckanext.xloader.jobs.MAX_EXCERPT_LINES", 1):
-                stdout = cli.invoke(ckan, ["jobs", "worker", "--burst"]).output
+                result = cli.invoke(ckan, ["jobs", "worker", "--burst"])
+                stdout = result.output + result.stderr
                 assert "Loading excerpt of ~1 lines to DataStore." in stdout
 
         resource = helpers.call_action("resource_show", id=data["metadata"]["resource_id"])
@@ -194,7 +205,8 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
         file_suffix = 'multiplication_2.csv'
         self.enqueue(jobs.xloader_data_into_datastore, [data], rq_kwargs=dict(timeout=2))
         with mock.patch("ckanext.xloader.jobs.get_response", get_large_data_response):
-            stdout = cli.invoke(ckan, ["jobs", "worker", "--burst"]).output
+            result = cli.invoke(ckan, ["jobs", "worker", "--burst"])
+            stdout = result.output + result.stderr
             assert "Job timed out after" in stdout
             for f in _get_temp_files():
                 # make sure that the tmp file has been closed/deleted in job timeout exception handling
@@ -269,7 +281,8 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
         self.enqueue(jobs.xloader_data_into_datastore, [data])
         
         with mock.patch("ckanext.xloader.jobs._download_resource_data", mock_download_with_error):
-            stdout = cli.invoke(ckan, ["jobs", "worker", "--burst"]).output
+            result = cli.invoke(ckan, ["jobs", "worker", "--burst"])
+            stdout = result.output + result.stderr
             
             if should_retry:
                 # Check that retry was attempted
