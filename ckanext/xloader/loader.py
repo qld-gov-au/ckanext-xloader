@@ -713,7 +713,7 @@ def _populate_fulltext(connection, resource_id, fields, logger):
     '''
     try:
         # Get total row count to determine chunking strategy
-        rows_count = _get_rows_count_of_resource(connection, identifier(resource_id))
+        rows_count = _get_rows_count_of_resource(connection, identifier(resource_id, True))
     except Exception as e:
         rows_count = ''
         logger.info("Failed to get resource rows count: {} ".format(str(e)))
