@@ -676,37 +676,39 @@ def _enable_fulltext_trigger(connection, resource_id):
 
 
 def _get_rows_count_of_resource(connection, table):
-    tbl = sa.table(table, sa.column("_id"))
-    count_query = sa.select(sa.func.count(tbl.c._id))
-    rows_count = int(connection.execute(count_query).scalar())
+    count_query = sa.text(
+        'SELECT count(_id) from {table}'
+        .format(table=identifier(table, True)))
+    results = connection.execute(count_query)
+    rows_count = int(results.first()[0])
     return rows_count
 
 
 def _populate_fulltext(connection, resource_id, fields, logger):
     '''Populates the _full_text column for full-text search functionality.
-    
+
     This function creates a PostgreSQL tsvector (text search vector) for each row
     by concatenating all non-system columns. It's equivalent to datastore_run_triggers
     but runs approximately 9x faster by using direct SQL updates.
-    
+
     To handle very large datasets (e.g., 4GB+ files with millions of rows), the update
     operation is partitioned into chunks to prevent:
     - Database statement timeouts
     - Memory exhaustion
     - Lock contention that could block other operations
     - Transaction log overflow
-    
+
     The chunking mechanism processes rows in batches based on their _id values,
-    with chunk size configurable via 'ckanext.xloader.search_update_chunks' 
+    with chunk size configurable via 'ckanext.xloader.search_update_chunks'
     (default: 100,000 rows per chunk).
-    
+
     Args:
         connection: Database connection object
         resource_id (str): The datastore table identifier
-        fields (list): List of dicts with column 'id' (name) and 'type' 
+        fields (list): List of dicts with column 'id' (name) and 'type'
             (text/numeric/timestamp)
         logger: Logger instance for progress tracking
-        
+
     Note:
         This reimplements CKAN's text indexing logic for performance,
         breaking DRY principle but providing significant speed improvements.
@@ -718,12 +720,12 @@ def _populate_fulltext(connection, resource_id, fields, logger):
         rows_count = ''
         logger.info("Failed to get resource rows count: {} ".format(str(e)))
         raise
-        
+
     if rows_count:
         # Configure chunk size - prevents timeouts and memory issues on large datasets
         # Default 100,000 rows per chunk balances performance vs. resource usage
         chunks = int(config.get('ckanext.xloader.search_update_chunks', 100000))
-        
+
         # Process table in chunks using _id range queries
         # This approach ensures consistent chunk sizes and allows resuming if interrupted
         for start in range(0, rows_count, chunks):
@@ -748,7 +750,7 @@ def _populate_fulltext(connection, resource_id, fields, logger):
                         first=start,
                         end=start + chunks
                     )
-                connection.execute(sa.text(sql))
+                connection.execute(sql)
                 logger.info("Indexed rows {first} to {end} of {total}".format(
                     first=start, end=min(start + chunks, rows_count), total=rows_count))
             except Exception as e:
