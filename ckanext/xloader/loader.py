@@ -676,9 +676,9 @@ def _enable_fulltext_trigger(connection, resource_id):
 
 
 def _get_rows_count_of_resource(connection, table):
-    count_query = ''' SELECT count(_id) from {table} '''.format(table=table)
-    results = connection.execute(sa.text(count_query))
-    rows_count = int(results.first()[0])
+    tbl = sa.table(table, sa.column("_id"))
+    count_query = sa.select(sa.func.count(tbl.c._id))
+    rows_count = int(connection.execute(count_query).scalar())
     return rows_count
 
 
