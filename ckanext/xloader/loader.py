@@ -734,7 +734,7 @@ def _populate_fulltext(connection, resource_id, fields, logger):
                     UPDATE {table}
                     SET _full_text = to_tsvector({cols}) WHERE _id BETWEEN {first} and {end};
                     '''.format(
-                        table=identifier(resource_id),
+                        table=identifier(resource_id, True),
                         # Concatenate all user columns (excluding system columns starting with '_')
                         # coalesce() handles NULL values by converting them to empty strings
                         cols=" || ' ' || ".join(
@@ -748,7 +748,7 @@ def _populate_fulltext(connection, resource_id, fields, logger):
                         first=start,
                         end=start + chunks
                     )
-                connection.execute(sql)
+                connection.execute(sa.text(sql))
                 logger.info("Indexed rows {first} to {end} of {total}".format(
                     first=start, end=min(start + chunks, rows_count), total=rows_count))
             except Exception as e:
