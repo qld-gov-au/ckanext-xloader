@@ -18,6 +18,8 @@ from rq import get_current_job
 from rq.timeouts import JobTimeoutException
 import sqlalchemy as sa
 
+from ckan import model
+from ckan.lib.jobs import DEFAULT_QUEUE_NAME
 from ckan.plugins.toolkit import get_action, asbool, enqueue_job, ObjectNotFound, config, h
 
 from . import db, loader
@@ -84,6 +86,7 @@ def is_retryable_error(error):
         return True
     return False
 
+DEFAULT_QUEUE_NAMES = config.get('ckanext.xloader.queue_names', DEFAULT_QUEUE_NAME).split()
 
 # input = {
 # 'api_key': user['apikey'],
@@ -98,6 +101,19 @@ def is_retryable_error(error):
 #     'original_url': resource_dict.get('url'),
 #     }
 # }
+
+
+def get_default_queue_name(package_id=None):
+    """ Retrieve the queue to be used in submitting jobs for the specified dataset.
+
+    By sending all jobs for a dataset to the same queue, lock conflicts are reduced.
+    """
+    if not DEFAULT_QUEUE_NAMES:
+        return DEFAULT_QUEUE_NAME
+    if not package_id:
+        return DEFAULT_QUEUE_NAMES[0]
+    return DEFAULT_QUEUE_NAMES[hash(package_id) % len(DEFAULT_QUEUE_NAMES)]
+
 
 def xloader_data_into_datastore(input):
     '''This is the func that is queued. It is a wrapper for
