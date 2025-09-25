@@ -15,20 +15,19 @@ from psycopg2 import errors
 from six.moves.urllib.parse import urlsplit
 import requests
 from rq import get_current_job
+from rq.timeouts import JobTimeoutException
 import sqlalchemy as sa
 
 from ckan import model
 from ckan.lib.jobs import DEFAULT_QUEUE_NAME
-from ckan.plugins.toolkit import get_action, asbool, enqueue_job, ObjectNotFound, config
+from ckan.plugins.toolkit import get_action, asbool, enqueue_job, ObjectNotFound, config, h
 
 from . import db, loader
-from .job_exceptions import JobError, HTTPError, DataTooBigError, FileCouldNotBeLoadedError
-from .utils import datastore_resource_exists, set_resource_metadata
+from .job_exceptions import JobError, HTTPError, DataTooBigError, FileCouldNotBeLoadedError, LoaderError, XLoaderTimeoutError
+from .utils import datastore_resource_exists, set_resource_metadata, modify_input_url
 
-try:
-    from ckan.lib.api_token import get_user_from_token
-except ImportError:
-    get_user_from_token = None
+
+from ckan.lib.api_token import get_user_from_token
 
 log = logging.getLogger(__name__)
 
@@ -43,15 +42,49 @@ MAX_EXCERPT_LINES = int(config.get('ckanext.xloader.max_excerpt_lines') or 0)
 CHUNK_SIZE = 16 * 1024  # 16kb
 DOWNLOAD_TIMEOUT = 30
 
-MAX_RETRIES = 1
+MAX_RETRIES = int(config.get('ckanext.xloader.max_retries', 1))
 RETRYABLE_ERRORS = (
     errors.DeadlockDetected,
     errors.LockNotAvailable,
     errors.ObjectInUse,
+    HTTPError,
+    XLoaderTimeoutError
 )
 # Retries can only occur in cases where the datastore entry exists,
 # so use the standard timeout
 RETRIED_JOB_TIMEOUT = config.get('ckanext.xloader.job_timeout', '3600')
+APITOKEN_HEADER_NAME = config.get('apitoken_header_name', 'Authorization')
+
+
+def is_retryable_error(error):
+    """
+    Determine if an error should trigger a retry attempt.
+
+    Checks if the error is a temporary/transient condition that might
+    succeed on retry. Returns True for retryable HTTP status codes and
+    other temporary errors.
+
+    Retryable HTTP status codes:
+    - 408 Request Timeout
+    - 429 Too Many Requests
+    - 502 Bad Gateway
+    - 503 Service Unavailable
+    - 504 Gateway Timeout
+    - 507 Insufficient Storage
+    - 522 Connection Timed Out (Cloudflare)
+    - 524 A Timeout Occurred (Cloudflare)
+
+    :param error: Exception object to check
+    :type error: Exception
+    :return: True if error should be retried, False otherwise
+    :rtype: bool
+    """
+    if isinstance(error, HTTPError):
+        retryable_status_codes = {408, 429, 502, 503, 504, 507, 522, 524}
+        return error.status_code in retryable_status_codes
+    else:
+        return True
+    return False
 
 DEFAULT_QUEUE_NAMES = config.get('ckanext.xloader.queue_names', DEFAULT_QUEUE_NAME).split()
 
@@ -127,37 +160,12 @@ def xloader_data_into_datastore(input):
         job_dict['error'] = str(e)
         log.error('xloader error: job_id %s already exists', job_id)
         errored = True
-    except JobError as e:
-        db.mark_job_as_errored(job_id, str(e))
-        job_dict['status'] = 'error'
-        job_dict['error'] = str(e)
-        log.error('xloader error: %s, %s', e, traceback.format_exc())
-        errored = True
     except Exception as e:
-        if isinstance(e, RETRYABLE_ERRORS):
-            tries = job_dict['metadata'].get('tries', 0)
-            if tries < MAX_RETRIES:
-                tries = tries + 1
-                log.info("Job %s failed due to temporary error [%s], retrying", job_id, e)
-                logger.info("Job failed due to temporary error [%s], retrying", e)
-                job_dict['status'] = 'pending'
-                job_dict['metadata']['tries'] = tries
-                enqueue_job(
-                    xloader_data_into_datastore,
-                    [input],
-                    title="retry xloader_data_into_datastore: resource: {} attempt {}".format(
-                        job_dict['metadata']['resource_id'], tries),
-                    queue=job_dict['metadata'].get('queue_name', get_default_queue_name()),
-                    rq_kwargs=dict(timeout=RETRIED_JOB_TIMEOUT)
-                )
-                return None
-
-        db.mark_job_as_errored(
-            job_id, traceback.format_tb(sys.exc_info()[2])[-1] + repr(e))
-        job_dict['status'] = 'error'
-        job_dict['error'] = str(e)
-        log.error('xloader error: %s, %s', e, traceback.format_exc())
-        errored = True
+        error_state = {'errored': errored}
+        retry = handle_retryable_error(e, input, job_id, job_dict, logger, error_state)
+        if retry:
+            return None
+        errored = error_state['errored']
     finally:
         # job_dict is defined in xloader_hook's docstring
         is_saved_ok = callback_xloader_hook(result_url=input['result_url'],
@@ -165,6 +173,54 @@ def xloader_data_into_datastore(input):
                                             job_dict=job_dict)
         errored = errored or not is_saved_ok
     return 'error' if errored else None
+
+
+def handle_retryable_error(e, input, job_id, job_dict, logger, error_state):
+    """
+    Handle retryable errors by attempting to retry the job or marking it as failed.
+
+    Checks if the error is retryable (database deadlocks, HTTP timeouts, etc.) and
+    within the retry limit. If so, enqueues a new job attempt. Otherwise, marks
+    the job as errored.
+
+    :param e: The exception that occurred
+    :type e: Exception
+    :param input: Job input data containing metadata and API key
+    :type input: dict
+    :param job_id: Unique identifier for the current job
+    :type job_id: str
+    :param job_dict: Job status dictionary with metadata and status
+    :type job_dict: dict
+    :param logger: Logger instance for the current job
+    :type logger: logging.Logger
+    :param error_state: Mutable dict to track error state {'errored': bool}
+    :type error_state: dict
+
+    :returns: True if job was retried, None otherwise
+    :rtype: bool or None
+    """
+    if isinstance(e, RETRYABLE_ERRORS) and is_retryable_error(e):
+        tries = job_dict['metadata'].get('tries', 0)
+        if tries < MAX_RETRIES:
+            tries = tries + 1
+            log.info("Job %s failed due to temporary error [%s], retrying", job_id, e)
+            logger.info("Job failed due to temporary error [%s], retrying", e)
+            job_dict['status'] = 'pending'
+            job_dict['metadata']['tries'] = tries
+            enqueue_job(
+                xloader_data_into_datastore,
+                [input],
+                title="retry xloader_data_into_datastore: resource: {} attempt {}".format(
+                    job_dict['metadata']['resource_id'], tries),
+                rq_kwargs=dict(timeout=RETRIED_JOB_TIMEOUT)
+            )
+            return True
+    db.mark_job_as_errored(
+        job_id, traceback.format_tb(sys.exc_info()[2])[-1] + repr(e))
+    job_dict['status'] = 'error'
+    job_dict['error'] = str(e)
+    log.error('xloader error: %s, %s', e, traceback.format_exc())
+    error_state['errored'] = True
 
 
 def xloader_data_into_datastore_(input, job_dict, logger):
@@ -193,8 +249,14 @@ def xloader_data_into_datastore_(input, job_dict, logger):
     logger.info('Express Load starting: %s', resource_ckan_url)
 
     # check if the resource url_type is a datastore
-    if resource.get('url_type') == 'datastore':
-        logger.info('Ignoring resource - url_type=datastore - dump files are '
+    if hasattr(h, "datastore_rw_resource_url_types"):
+        datastore_rw_resource_url_types = h.datastore_rw_resource_url_types()
+    else:
+        # fallback for 2.10.x or older.
+        datastore_rw_resource_url_types = ['datastore']
+
+    if resource.get('url_type') in datastore_rw_resource_url_types:
+        logger.info('Ignoring resource - R/W DataStore resources are '
                     'managed with the Datastore API')
         return
 
@@ -210,11 +272,12 @@ def xloader_data_into_datastore_(input, job_dict, logger):
     logger.info('File hash: %s', file_hash)
     resource['hash'] = file_hash
 
-    def direct_load():
+    def direct_load(allow_type_guessing=False):
         fields = loader.load_csv(
             tmp_file.name,
             resource_id=resource['id'],
             mimetype=resource.get('format'),
+            allow_type_guessing=allow_type_guessing,
             logger=logger)
         loader.calculate_record_count(
             resource_id=resource['id'], logger=logger)
@@ -270,17 +333,24 @@ def xloader_data_into_datastore_(input, job_dict, logger):
                 direct_load()
         else:
             try:
-                direct_load()
-            except JobError as e:
+                direct_load(allow_type_guessing=True)
+            except (JobError, LoaderError) as e:
                 logger.warning('Load using COPY failed: %s', e)
                 logger.info('Trying again with tabulator')
                 tabulator_load()
+    except JobTimeoutException:
+        logger.warning('Job timed out after %ss', RETRIED_JOB_TIMEOUT)
+        raise JobError('Job timed out after {}s'.format(RETRIED_JOB_TIMEOUT))
     except FileCouldNotBeLoadedError as e:
         logger.warning('Loading excerpt for this format not supported.')
         logger.error('Loading file raised an error: %s', e)
         raise JobError('Loading file raised an error: {}'.format(e))
-
-    tmp_file.close()
+    finally:
+        try:
+            tmp_file.close()
+            os.remove(tmp_file.name)
+        except FileNotFoundError:
+            pass
 
     logger.info('Express Load completed')
 
@@ -298,8 +368,9 @@ def _download_resource_data(resource, data, api_key, logger):
     data['datastore_contains_all_records_of_source_file'] = False
     which will be saved to the resource later on.
     '''
+    # update base url (for possible local loopback)
+    url = modify_input_url(resource.get('url'))
     # check scheme
-    url = resource.get('url')
     url_parts = urlsplit(url)
     scheme = url_parts.scheme
     if scheme not in ('http', 'https', 'ftp'):
@@ -318,7 +389,7 @@ def _download_resource_data(resource, data, api_key, logger):
         if resource.get('url_type') == 'upload':
             # If this is an uploaded file to CKAN, authenticate the request,
             # otherwise we won't get file from private resources
-            headers['Authorization'] = api_key
+            headers[APITOKEN_HEADER_NAME] = api_key
 
             # Add a constantly changing parameter to bypass URL caching.
             # If we're running XLoader, then either the resource has
@@ -373,6 +444,7 @@ def _download_resource_data(resource, data, api_key, logger):
         response.close()
         data['datastore_contains_all_records_of_source_file'] = False
     except requests.exceptions.HTTPError as error:
+        tmp_file.close()
         # status code error
         logger.debug('HTTP error: %s', error)
         raise HTTPError(
@@ -381,9 +453,10 @@ def _download_resource_data(resource, data, api_key, logger):
             request_url=url, response=error)
     except requests.exceptions.Timeout:
         logger.warning('URL time out after %ss', DOWNLOAD_TIMEOUT)
-        raise JobError('Connection timed out after {}s'.format(
-                       DOWNLOAD_TIMEOUT))
+        raise XLoaderTimeoutError('Connection timed out after {}s'.format(
+                                  DOWNLOAD_TIMEOUT))
     except requests.exceptions.RequestException as e:
+        tmp_file.close()
         try:
             err_message = str(e.reason)
         except AttributeError:
@@ -392,6 +465,10 @@ def _download_resource_data(resource, data, api_key, logger):
         raise HTTPError(
             message=err_message, status_code=None,
             request_url=url, response=None)
+    except JobTimeoutException:
+        tmp_file.close()
+        logger.warning('Job timed out after %ss', RETRIED_JOB_TIMEOUT)
+        raise JobError('Job timed out after {}s'.format(RETRIED_JOB_TIMEOUT))
 
     logger.info('Downloaded ok - %s', printable_file_size(length))
     file_hash = m.hexdigest()
@@ -458,12 +535,12 @@ def callback_xloader_hook(result_url, api_key, job_dict):
         if ':' in api_key:
             header, key = api_key.split(':')
         else:
-            header, key = 'Authorization', api_key
+            header, key = APITOKEN_HEADER_NAME, api_key
         headers[header] = key
 
     try:
         result = requests.post(
-            result_url,
+            modify_input_url(result_url),  # modify with local config
             data=json.dumps(job_dict, cls=DatetimeJsonEncoder),
             verify=SSL_VERIFY,
             headers=headers)
@@ -506,19 +583,8 @@ def update_resource(resource, patch_only=False):
 
 def _get_user_from_key(api_key_or_token):
     """ Gets the user using the API Token or API Key.
-
-    This method provides backwards compatibility for CKAN 2.9 that
-    supported both methods and previous CKAN versions supporting
-    only API Keys.
     """
-    user = None
-    if get_user_from_token:
-        user = get_user_from_token(api_key_or_token)
-    if not user:
-        user = model.Session.query(model.User).filter_by(
-            apikey=api_key_or_token
-        ).first()
-    return user
+    return get_user_from_token(api_key_or_token)
 
 
 def get_resource_and_dataset(resource_id, api_key):

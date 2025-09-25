@@ -1,4 +1,5 @@
 import pytest
+from ckan.plugins import toolkit
 try:
     from unittest import mock
 except ImportError:
@@ -13,6 +14,7 @@ from ckanext.xloader.utils import get_xloader_user_apitoken
 @pytest.mark.usefixtures("clean_db", "with_plugins")
 @pytest.mark.ckan_config("ckan.plugins", "datastore xloader")
 class TestAction(object):
+
     def test_submit(self):
         # checks that xloader_submit enqueues the resource (to be xloadered)
         user = factories.User()
@@ -117,10 +119,23 @@ class TestAction(object):
 
         assert status["status"] == "pending"
 
-    def test_xloader_user_api_token_defaults_to_site_user_apikey(self):
-        api_token = get_xloader_user_apitoken()
-        site_user = helpers.call_action("get_site_user")
-        assert api_token == site_user["apikey"]
+    def test_xloader_user_api_token_from_config(self):
+        sysadmin = factories.SysadminWithToken()
+        apikey = sysadmin["token"]
+        with mock.patch.dict(toolkit.config, {'ckanext.xloader.api_token': apikey}):
+            api_token = get_xloader_user_apitoken()
+            assert api_token == apikey
+
+    @pytest.mark.ckan_config("ckanext.xloader.api_token", "NOT_SET")
+    def test_xloader_user_api_token_from_config_should_throw_exceptio_when_not_set(self):
+
+        hasNotThrownException = True
+        try:
+            get_xloader_user_apitoken()
+        except Exception:
+            hasNotThrownException = False
+
+        assert not hasNotThrownException
 
     @pytest.mark.ckan_config("ckanext.xloader.api_token", "random-api-token")
     def test_xloader_user_api_token(self):

@@ -1,24 +1,22 @@
 # encoding: utf-8
 
+from collections import defaultdict
+from decimal import Decimal
 import json
 import datetime
-
+import logging
+import re
 from six import text_type as str, binary_type
+from urllib.parse import urlunparse, urlparse
 
 from ckan import model
 from ckan.lib import search
-from collections import defaultdict
-from decimal import Decimal
-
-import ckan.plugins as p
-from ckan.plugins.toolkit import config, h, _
+import ckan.plugins.toolkit as tk
 
 from .job_exceptions import JobError
 
-from logging import getLogger
+log = logging.getLogger(__name__)
 
-
-log = getLogger(__name__)
 
 # resource.formats accepted by ckanext-xloader. Must be lowercase here.
 DEFAULT_FORMATS = [
@@ -40,7 +38,7 @@ class XLoaderFormats(object):
     @classmethod
     def is_it_an_xloader_format(cls, format_):
         if cls.formats is None:
-            cls._formats = config.get("ckanext.xloader.formats")
+            cls._formats = tk.config.get("ckanext.xloader.formats")
             if cls._formats is not None:
                 # use config value. preserves empty list as well.
                 cls._formats = cls._formats.lower().split()
@@ -52,15 +50,17 @@ class XLoaderFormats(object):
 
 
 def requires_successful_validation_report():
-    return p.toolkit.asbool(config.get('ckanext.xloader.validation.requires_successful_report', False))
+    return tk.asbool(tk.config.get('ckanext.xloader.validation.requires_successful_report', False))
 
 
 def awaiting_validation(res_dict):
     """
     Checks the existence of a logic action from the ckanext-validation
     plugin, thus supporting any extending of the Validation Plugin class.
+
     Checks ckanext.xloader.validation.requires_successful_report config
     option value.
+
     Checks ckanext.xloader.validation.enforce_schema config
     option value. Then checks the Resource's validation_status.
     """
@@ -72,7 +72,7 @@ def awaiting_validation(res_dict):
         # check for one of the main actions from ckanext-validation
         # in the case that users extend the Validation plugin class
         # and rename the plugin entry-point.
-        p.toolkit.get_action('resource_validation_show')
+        tk.get_action('resource_validation_show')
         is_validation_plugin_loaded = True
     except KeyError:
         is_validation_plugin_loaded = False
@@ -83,7 +83,7 @@ def awaiting_validation(res_dict):
                     'requires the ckanext-validation plugin to be activated.')
         return False
 
-    if (p.toolkit.asbool(config.get('ckanext.xloader.validation.enforce_schema', True))
+    if (tk.asbool(tk.config.get('ckanext.xloader.validation.enforce_schema', True))
             or res_dict.get('schema', None)) and res_dict.get('validation_status', None) != 'success':
 
         # either validation.enforce_schema is turned on or it is off and there is a schema,
@@ -97,12 +97,12 @@ def awaiting_validation(res_dict):
 
 def resource_data(id, resource_id, rows=None):
 
-    if p.toolkit.request.method == "POST":
+    if tk.request.method == "POST":
 
         context = {
             "ignore_auth": True,
         }
-        resource_dict = p.toolkit.get_action("resource_show")(
+        resource_dict = tk.get_action("resource_show")(
             context,
             {
                 "id": resource_id,
@@ -110,41 +110,41 @@ def resource_data(id, resource_id, rows=None):
         )
 
         if awaiting_validation(resource_dict):
-            h.flash_error(_("Cannot upload resource %s to the DataStore "
-                            "because the resource did not pass validation yet.") % resource_id)
-            return p.toolkit.redirect_to(
+            tk.h.flash_error(tk._("Cannot upload resource %s to the DataStore "
+                                  "because the resource did not pass validation yet.") % resource_id)
+            return tk.redirect_to(
                 "xloader.resource_data", id=id, resource_id=resource_id
             )
 
         try:
-            p.toolkit.get_action("xloader_submit")(
+            tk.get_action("xloader_submit")(
                 None,
                 {
                     "resource_id": resource_id,
                     "ignore_hash": True,  # user clicked the reload button
                 },
             )
-        except p.toolkit.ValidationError:
+        except tk.ValidationError:
             pass
 
-        return p.toolkit.redirect_to(
+        return tk.redirect_to(
             "xloader.resource_data", id=id, resource_id=resource_id
         )
 
     try:
-        pkg_dict = p.toolkit.get_action("package_show")(None, {"id": id})
-        resource = p.toolkit.get_action("resource_show")(None, {"id": resource_id})
-    except (p.toolkit.ObjectNotFound, p.toolkit.NotAuthorized):
-        return p.toolkit.abort(404, p.toolkit._("Resource not found"))
+        pkg_dict = tk.get_action("package_show")(None, {"id": id})
+        resource = tk.get_action("resource_show")(None, {"id": resource_id})
+    except (tk.ObjectNotFound, tk.NotAuthorized):
+        return tk.abort(404, tk._("Resource not found"))
 
     try:
-        xloader_status = p.toolkit.get_action("xloader_status")(
+        xloader_status = tk.get_action("xloader_status")(
             None, {"resource_id": resource_id}
         )
-    except p.toolkit.ObjectNotFound:
+    except tk.ObjectNotFound:
         xloader_status = {}
-    except p.toolkit.NotAuthorized:
-        return p.toolkit.abort(403, p.toolkit._("Not authorized to see this page"))
+    except tk.NotAuthorized:
+        return tk.abort(403, tk._("Not authorized to see this page"))
 
     extra_vars = {
         "status": xloader_status,
@@ -153,7 +153,7 @@ def resource_data(id, resource_id, rows=None):
     }
     if rows:
         extra_vars["rows"] = rows
-    return p.toolkit.render(
+    return tk.render(
         "xloader/resource_data.html",
         extra_vars=extra_vars,
     )
@@ -166,12 +166,72 @@ def get_xloader_user_apitoken():
     method returns the api_token set in the config file and defaults to the
     site_user.
     """
-    api_token = p.toolkit.config.get('ckanext.xloader.api_token', None)
-    if api_token:
+    api_token = tk.config.get('ckanext.xloader.api_token')
+    if api_token and api_token != 'NOT_SET':
         return api_token
+    raise tk.ValidationError({u'ckanext.xloader.api_token': u'NOT_SET, please provide valid api token'})
 
-    site_user = p.toolkit.get_action('get_site_user')({'ignore_auth': True}, {})
-    return site_user["apikey"]
+
+def _modify_url(input_url: str, base_url: str) -> str:
+    """ Modifies the input URL with base_url provided.
+
+    Args:
+        input_url (str): The original URL to potentially modify
+        base_url (str): The base URL to compare/replace against
+    Returns:
+        str: The modified URL with replaced scheme and netloc
+    """
+    parsed_input_url = urlparse(input_url)
+    parsed_base_url = urlparse(base_url)
+    # Do not modify non-HTTP(S) URLs (e.g., ftp://)
+    if parsed_input_url.scheme not in ("http", "https"):
+        return input_url
+    # replace scheme: "http/https" and netloc:"//<user>:<password>@<host>:<port>/<url-path>"
+    new_url = urlunparse(
+        (parsed_base_url.scheme,
+         parsed_base_url.netloc,
+         parsed_input_url.path,
+         parsed_input_url.params,
+         parsed_input_url.query,
+         parsed_input_url.fragment))
+    return new_url
+
+
+def modify_input_url(input_url: str) -> str:
+    """Returns a potentially modified CKAN URL.
+
+    This function takes a possible CKAN URL and potentially modifies its base URL while preserving the path,
+    query parameters, and fragments. The modification occurs only if three conditions are met:
+    1. The base URL of the input matches the configured CKAN site URL (ckan.site_url).
+    2. A `ckanext.xloader.site_url` is configured in the settings.
+    3. A `ckanext.xloader.site_url_ignore_path_regex` if configured in the settings and does not match.
+
+    Args:
+        input_url (str): The original CKAN URL to potentially modify
+    Returns:
+        str: Either the modified URL with new base URL from xloader_site_url,
+             or the original URL if conditions aren't met
+    """
+
+    xloader_site_url = tk.config.get('ckanext.xloader.site_url')
+    if not xloader_site_url:
+        return input_url
+
+    parsed_input_url = urlparse(input_url)
+    input_base_url = f"{parsed_input_url.scheme}://{parsed_input_url.netloc}"
+    parsed_ckan_site_url = urlparse(tk.config.get('ckan.site_url'))
+    ckan_base_url = f"{parsed_ckan_site_url.scheme}://{parsed_ckan_site_url.netloc}"
+
+    xloader_ignore_regex = tk.config.get('ckanext.xloader.site_url_ignore_path_regex')
+
+    # Don't alter non-matching base URLs.
+    if input_base_url != ckan_base_url:
+        return input_url
+    # And not any URLs on the ignore regex
+    elif xloader_ignore_regex and re.search(xloader_ignore_regex, input_url):
+        return input_url
+
+    return _modify_url(input_url, xloader_site_url)
 
 
 def set_resource_metadata(update_dict):
@@ -204,7 +264,7 @@ def set_resource_metadata(update_dict):
         'q': 'id:"{0}"'.format(resource.package_id),
         'fl': 'data_dict',
         'wt': 'json',
-        'fq': 'site_id:"%s"' % p.toolkit.config.get('ckan.site_id'),
+        'fq': 'site_id:"%s"' % tk.config.get('ckan.site_id'),
         'rows': 1
     }
     for record in solr_query.run(q)['results']:
@@ -272,7 +332,7 @@ def type_guess(rows, types=TYPES, strict=False):
         at_least_one_value = []
         for ri, row in enumerate(rows):
             diff = len(row) - len(guesses)
-            for i in range(diff):
+            for _i in range(diff):
                 typesdict = {}
                 for type in types:
                     typesdict[type] = 0
@@ -325,8 +385,8 @@ def type_guess(rows, types=TYPES, strict=False):
 def datastore_resource_exists(resource_id):
     context = {'model': model, 'ignore_auth': True}
     try:
-        response = p.toolkit.get_action('datastore_search')(context, dict(
+        response = tk.get_action('datastore_search')(context, dict(
             id=resource_id, limit=0))
-    except p.toolkit.ObjectNotFound:
+    except tk.ObjectNotFound:
         return False
     return response or {'fields': []}

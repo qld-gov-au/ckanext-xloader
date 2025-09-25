@@ -112,13 +112,13 @@ type -offers to contribute this are welcomed.
 
 Compatibility with core CKAN versions:
 
-  | CKAN version   | Compatibility                                                                                                  |
-  | -------------- | -------------------------------------------------------------------------------------------------------------- |
-  | 2.7            | no longer supported (last supported version: 0.12.2)                                                           |
-  | 2.8            | no longer supported (last supported version: 0.12.2)                                                           | 
-  | 2.9            | yes (Python3) (last supported version for Python 2.7: 0.12.2)), Must: `pip install "setuptools>=44.1.0,<71"`   |
-  | 2.10           | yes                                                                                                            |
-  | 2.11           | yes                                                                                                            |
+  | CKAN version   | Compatibility                                         |
+  | -------------- |-------------------------------------------------------|
+  | 2.7            | no longer supported (last supported version: 0.12.2)  |
+  | 2.8            | no longer supported (last supported version: 0.12.2)  |
+  | 2.9            | no longer supported (last supported version: 1.2.x)   |
+  | 2.10           | yes                                                   |
+  | 2.11           | yes                                                   |
 
 ## Installation
 
@@ -151,6 +151,7 @@ To install XLoader:
     execute jobs against the server:
 
         ckanext.xloader.api_token = <your-CKAN-generated-API-Token>
+        ckan config-tool test.ini "ckanext.xloader.api_token=$(ckan -c test.ini user token add ckan_admin xloader | tail -n 1 | tr -d '\t')"
 
 6.  If it is a production server, you'll want to store jobs info in a
     more robust database than the default sqlite file. It can happily
@@ -189,7 +190,7 @@ expect European (day-first) dates, you could add to `postgresql.conf`:
 
     datestyle=ISO,DMY
 
-All configurations below are defined in the 
+All configurations below are defined in the
 [config_declaration.yaml](ckanext/xloader/config_declaration.yaml) file.
 
 
@@ -220,8 +221,7 @@ ckanext.xloader.api_token = eyJ0eXAiOiJKV1QiLCJh.eyJqdGkiOiJ0M2VNUFlQWFg0VU.8QgV
 
 Default value: none
 
-Uses a specific API token for the xloader_submit action instead of the
-apikey of the site_user. It's mandatory starting from CKAN 2.10. You can get one
+It's mandatory starting from CKAN 2.10. You can get one
 running the command `ckan user token add {USER_NAME} xloader -q`
 
 
@@ -422,6 +422,63 @@ Default value: 'default'
 Defines the queue(s) available to use for XLoader jobs.
 Jobs for the same package will be sent to the same queue,
 to reduce lock contention.
+
+#### ckanext.xloader.validation.requires_successful_report
+
+Supports: __ckanext-validation__
+
+Example:
+
+```
+ckanext.xloader.validation.requires_successful_report = True
+```
+
+Default value: `False`
+
+Controls whether or not a resource requires a successful validation report from the ckanext-validation plugin in order to be XLoadered.
+
+#### ckanext.xloader.validation.enforce_schema
+
+Supports: __ckanext-validation__
+
+Example:
+
+```
+ckanext.xloader.validation.enforce_schema = False
+```
+
+Default value: `True`
+
+Controls whether or not a resource requires a Validation Schema to be present from the ckanext-validation plugin to be XLoadered.
+
+#### ckanext.xloader.site_url
+Provide an alternate site URL for the xloader_submit action.
+This is useful, for example, when the site is running within a docker network.
+    
+Note: This setting will not alter path. i.e ckan.root_path
+
+Example:
+
+```
+ckanext.xloader.site_url = http://ckan-dev:5000
+```
+
+##### ckanext.xloader.site_url_ignore_path_regex
+Provide the ability to ignore paths which can't be mapped to alternative site URL for resource access.
+This is useful, for example, when the site is running within a docker network and the cdn front door has
+Blob storage mapped to another path on the same domain.
+
+Example:
+
+```
+ckanext.xloader.site_url_ignore_path_regex = "(/PathToS3HostOriginIWantToGoDirectTo|/anotherPath)"
+```
+
+## Data Dictionary Fields
+
+#### strip_extra_white
+
+This plugin adds the `Strip Extra Leading and Trailing White Space` field to Data Dictionary fields. This controls whether or not to trim whitespace from data values prior to inserting into the database. Default for each field is `True` (it will trim whitespace).
 
 ## Developer installation
 
