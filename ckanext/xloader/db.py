@@ -120,10 +120,14 @@ def get_job(job_id):
         return None
 
     # Turn the result into a dictionary representation of the job.
-    if hasattr(result, 'mappings'):
-        result = result.mappings()
+    if hasattr(result, '_fields'):
+        result_keys = result._fields
+    elif hasattr(result, 'keys'):
+        result_keys = result.keys()
+    else:
+        raise AttributeError("Unable to find field names in row object: {}".format(result))
     result_dict = {}
-    for field in list(result.keys()):
+    for field in list(result_keys):
         value = getattr(result, field)
         if value is None:
             result_dict[field] = value
