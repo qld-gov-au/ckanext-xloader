@@ -120,6 +120,8 @@ def get_job(job_id):
         return None
 
     # Turn the result into a dictionary representation of the job.
+    if hasattr(result, 'mappings'):
+        result = result.mappings()
     result_dict = {}
     for field in list(result.keys()):
         value = getattr(result, field)
