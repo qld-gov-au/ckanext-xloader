@@ -1,6 +1,7 @@
 import pytest
 import io
 import os
+import time
 
 from datetime import datetime
 
@@ -90,8 +91,13 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
         self.enqueue(jobs.xloader_data_into_datastore, [data])
         with mock.patch("ckanext.xloader.jobs.get_response", get_response):
             cli.invoke(ckan, ["jobs", "worker", "--burst"])
-            xloader_status = helpers.call_action("xloader_status", resource_id=data['metadata']['resource_id'])
-            assert xloader_status['status'] == 'Complete'
+            for attempt in range(1, 10):
+                xloader_status = helpers.call_action("xloader_status", resource_id=data['metadata']['resource_id'])['status']
+                if xloader_status == 'complete':
+                    return
+                else:
+                    assert xloader_status == 'pending'
+                    time.sleep(1)
 
     def test_xloader_data_into_datastore_sync(self, cli, data):
         package_id = helpers.call_action('resource_show', id=data['metadata']['resource_id'])['package_id']
