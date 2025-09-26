@@ -95,12 +95,13 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
 
     def test_xloader_data_into_datastore_sync(self, cli, data):
         package_id = helpers.call_action('resource_show', id=data['metadata']['resource_id'])['package_id']
-        stdout = cli.invoke(ckan, ["xloader", "submit", "--sync", package_id]).output
-        assert "File hash: d44fa65eda3675e11710682fdb5f1648" in stdout
-        assert "Fields: [{'id': 'x', 'type': 'text', 'strip_extra_white': True}, {'id': 'y', 'type': 'text', 'strip_extra_white': True}]" in stdout
-        assert "Copying to database..." in stdout
-        assert "Creating search index..." in stdout
-        assert "Express Load completed" in stdout
+        with mock.patch("ckanext.xloader.jobs.get_response", get_response):
+            stdout = cli.invoke(ckan, ["xloader", "submit", "--sync", package_id]).output
+            assert "File hash: d44fa65eda3675e11710682fdb5f1648" in stdout
+            assert "Fields: [{'id': 'x', 'type': 'text', 'strip_extra_white': True}, {'id': 'y', 'type': 'text', 'strip_extra_white': True}]" in stdout
+            assert "Copying to database..." in stdout
+            assert "Creating search index..." in stdout
+            assert "Express Load completed" in stdout
 
         resource = helpers.call_action("resource_show", id=data["metadata"]["resource_id"])
         assert resource["datastore_contains_all_records_of_source_file"]
