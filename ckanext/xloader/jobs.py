@@ -268,6 +268,8 @@ def xloader_data_into_datastore_(input, job_dict, logger):
             and not data.get('ignore_hash')):
         logger.info('Ignoring resource - the file hash hasn\'t changed: '
                     '{hash}.'.format(hash=file_hash))
+        tmp_file.close()
+        os.remove(tmp_file.name)
         return
     logger.info('File hash: %s', file_hash)
     resource['hash'] = file_hash
