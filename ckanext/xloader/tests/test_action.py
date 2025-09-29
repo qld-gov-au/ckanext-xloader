@@ -32,6 +32,7 @@ class TestAction(object):
                 resource_id=res["id"],
             )
             assert 1 == enqueue_mock.call_count
+            assert enqueue_mock.call_args[1].get('queue') == 'default{}'.format(hash(res['package_id']) % 2)
 
     def test_submit_to_custom_queue_without_auth(self):
         # check that xloader_submit doesn't allow regular users to change queues

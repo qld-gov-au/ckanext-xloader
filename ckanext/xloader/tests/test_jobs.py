@@ -81,16 +81,22 @@ def data(create_with_upload, apikey):
     }
 
 
+def _worker_arguments(data):
+    """ Returns a list of arguments suitable for a Click invocation
+    to launch a worker that will consume the associated XLoader submission.
+    """
+    return ["jobs", "worker", "default" + hash(data) % 2, "--burst"]
+
+
 @pytest.mark.usefixtures("clean_db", "with_plugins")
 @pytest.mark.ckan_config("ckanext.xloader.job_timeout", 2)
 @pytest.mark.ckan_config("ckan.jobs.timeout", 2)
-@pytest.mark.ckan_config("ckanext.xloader.queue_names", "default0 default1")
 class TestXLoaderJobs(helpers.FunctionalRQTestBase):
 
     def test_xloader_data_into_datastore(self, cli, data):
         self.enqueue(jobs.xloader_data_into_datastore, [data])
         with mock.patch("ckanext.xloader.jobs.get_response", get_response):
-            stdout = cli.invoke(ckan, ["jobs", "worker", "default", "--burst"]).output
+            stdout = cli.invoke(ckan, ["jobs", "worker", "--burst"]).output
         assert "File hash: d44fa65eda3675e11710682fdb5f1648" in stdout
         assert "Fields: [{'id': 'x', 'type': 'text', 'strip_extra_white': True}, {'id': 'y', 'type': 'text', 'strip_extra_white': True}]" in stdout
         assert "Copying to database..." in stdout
