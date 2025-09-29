@@ -390,3 +390,17 @@ def datastore_resource_exists(resource_id):
     except tk.ObjectNotFound:
         return False
     return response or {'fields': []}
+
+
+def _attr_or_dict_value(row, field_name):
+    """ Retrieve the specified field from the row, either as a dict value,
+    or an object attribute, whichever is present.
+
+    If neither is possible, raise an AttributeError.
+    """
+    if isinstance(row, dict):
+        return row.get(field_name)
+    elif hasattr(row, field_name):
+        return getattr(row, field_name)
+    else:
+        raise AttributeError("Unable to retrieve field [{}] from row: {}".format(field_name, row))

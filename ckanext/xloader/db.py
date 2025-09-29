@@ -7,10 +7,10 @@ Loosely based on ckan-service-provider's db.py
 
 import datetime
 import json
-
 import six
 import sqlalchemy
 
+from .utils import _attr_or_dict_value
 
 ENGINE = None
 _METADATA = None
@@ -458,10 +458,10 @@ def _get_metadata(job_id):
                 METADATA_TABLE.c.job_id == job_id)).fetchall()
     metadata = {}
     for row in results:
-        value = row['value']
-        if row['type'] == 'json':
+        value = _attr_or_dict_value(row, 'value')
+        if _attr_or_dict_value(row, 'type') == 'json':
             value = json.loads(value)
-        metadata[row['key']] = value
+        metadata[_attr_or_dict_value(row, 'key')] = value
     return metadata
 
 
