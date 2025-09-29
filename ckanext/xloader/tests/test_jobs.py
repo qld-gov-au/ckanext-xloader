@@ -110,7 +110,7 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
         assert "Fields: [{'id': 'x', 'type': 'text', 'strip_extra_white': True}, {'id': 'y', 'type': 'text', 'strip_extra_white': True}]" in stdout
         assert "Copying to database..." in stdout
         assert "Creating search index..." in stdout
-        assert "Express Load completed" in stdout
+        assert "Express Load completed" in stdout, stdout  # output full string on failure
 
         resource = helpers.call_action("resource_show", id=data["metadata"]["resource_id"])
         assert resource["datastore_contains_all_records_of_source_file"]
