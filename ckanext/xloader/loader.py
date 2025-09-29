@@ -676,8 +676,8 @@ def _enable_fulltext_trigger(connection, resource_id):
 
 
 def _get_rows_count_of_resource(connection, table):
-    count_query = ''' SELECT count(_id) from {table} '''.format(table=table)
-    results = connection.execute(count_query)
+    results = connection.execute(sa.text(
+        'SELECT count(_id) from {table}'.format(table=table)))
     rows_count = int(results.first()[0])
     return rows_count
 
@@ -748,7 +748,7 @@ def _populate_fulltext(connection, resource_id, fields, logger):
                         first=start,
                         end=start + chunks
                     )
-                connection.execute(sql)
+                connection.execute(sa.text(sql))
                 logger.info("Indexed rows {first} to {end} of {total}".format(
                     first=start, end=min(start + chunks, rows_count), total=rows_count))
             except Exception as e:
