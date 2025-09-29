@@ -15,6 +15,7 @@ from ckanext.xloader.utils import get_xloader_user_apitoken
 @pytest.mark.ckan_config("ckan.plugins", "datastore xloader")
 class TestAction(object):
 
+    @pytest.mark.ckan_config("ckanext.xloader.queue_names", "default0 default1")
     def test_submit(self):
         # checks that xloader_submit enqueues the resource (to be xloadered)
         user = factories.User()
@@ -32,6 +33,7 @@ class TestAction(object):
                 resource_id=res["id"],
             )
             assert 1 == enqueue_mock.call_count
+            assert enqueue_mock.call_args[1].get('queue') == 'default{}'.format(hash(res['package_id']) % 2)
 
     def test_submit_to_custom_queue_without_auth(self):
         # check that xloader_submit doesn't allow regular users to change queues
