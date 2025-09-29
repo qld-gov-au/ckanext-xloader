@@ -57,7 +57,7 @@ def apikey():
 
 @pytest.fixture
 def data(create_with_upload, apikey):
-    dataset = factories.Dataset()
+    dataset = factories.Dataset(with_custom_schema=False)
     resource = create_with_upload(
         _TEST_FILE_CONTENT,
         "multiplication_2.csv",
