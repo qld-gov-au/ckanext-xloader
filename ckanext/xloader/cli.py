@@ -46,6 +46,8 @@ def submit(dataset_spec, y, dry_run, queue, sync):
         pkg_name_or_id = dataset_spec
         cmd._setup_xloader_logger()
         cmd._submit_package(pkg_name_or_id, sync=sync, queue=queue)
+    sys.stdout.flush()
+    sys.stderr.flush()
 
     if cmd.error_occured:
         print('Finished but saw errors - see above for details')
