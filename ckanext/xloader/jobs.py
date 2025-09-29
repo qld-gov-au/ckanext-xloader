@@ -145,7 +145,8 @@ def xloader_data_into_datastore(input):
     handler.setFormatter(logging.Formatter('%(message)s'))
     logger.addHandler(handler)
     # also show logs on stderr
-    logger.addHandler(logging.StreamHandler())
+    streamHandler = logging.StreamHandler()
+    logger.addHandler(streamHandler)
     logger.setLevel(logging.DEBUG)
 
     db.init(config)
@@ -173,6 +174,7 @@ def xloader_data_into_datastore(input):
                                             api_key=input['api_key'],
                                             job_dict=job_dict)
         errored = errored or not is_saved_ok
+        streamHandler.flush()
     return 'error' if errored else None
 
 
