@@ -86,6 +86,17 @@ def data(create_with_upload, apikey):
 @pytest.mark.ckan_config("ckan.jobs.timeout", 2)
 class TestXLoaderJobs(helpers.FunctionalRQTestBase):
 
+    def test_derive_queue_name(self):
+        assert jobs.get_default_queue_name() == "default0"
+        # hash('foo') == -2531596919889323877
+        assert jobs.get_default_queue_name("foo") == "default1"
+        # hash('meh') == 7803861252145539596
+        assert jobs.get_default_queue_name("meh") == "default0"
+
+    @pytest.mark.ckan_config("ckanext.xloader.queue_names", "")
+    def test_default_queue_name_when_not_supplied(self):
+        assert jobs.get_default_queue_name("foo") == "default"
+
     def test_xloader_data_into_datastore(self, cli, data):
         self.enqueue(jobs.xloader_data_into_datastore, [data])
         with mock.patch("ckanext.xloader.jobs.get_response", get_response):
