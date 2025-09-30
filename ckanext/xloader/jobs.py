@@ -111,7 +111,13 @@ def get_default_queue_name(package_id=None):
         return DEFAULT_QUEUE_NAME
     if not package_id:
         return DEFAULT_QUEUE_NAMES[0]
-    return DEFAULT_QUEUE_NAMES[hash(package_id) % len(DEFAULT_QUEUE_NAMES)]
+
+    # Pick a queue by taking the first character of the package name
+    # and converting it into a numeric index to the list of queue names.
+    # We don't want a proper hash function, because those tend to add
+    # complications for the sake of (unnecessary) cryptographic strength.
+    queue_index = ord(package_id[0]) % len(DEFAULT_QUEUE_NAMES)
+    return DEFAULT_QUEUE_NAMES[queue_index]
 
 
 def xloader_data_into_datastore(input):
@@ -383,7 +389,7 @@ def _download_resource_data(resource, data, api_key, logger):
     logger.info('Fetching from: {0}'.format(url))
     tmp_file = get_tmp_file(url)
     length = 0
-    m = hashlib.md5()
+    m = hashlib.md5(usedforsecurity=False)
     cl = None
     try:
         headers = {}
