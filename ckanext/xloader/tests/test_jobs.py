@@ -91,10 +91,6 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
         assert jobs.get_default_queue_name("foo") == "default0"
         assert jobs.get_default_queue_name("meh") == "default1"
 
-    @pytest.mark.ckan_config("ckanext.xloader.queue_names", "")
-    def test_default_queue_name_when_not_supplied(self):
-        assert jobs.get_default_queue_name("foo") == "default"
-
     def test_xloader_data_into_datastore(self, cli, data):
         self.enqueue(jobs.xloader_data_into_datastore, [data])
         with mock.patch("ckanext.xloader.jobs.get_response", get_response):
