@@ -87,7 +87,7 @@ jobs:
 
     - name: ${{ matrix.experimental && '**Fail_Ignored** ' || '' }} Run tests
       continue-on-error: ${{ matrix.experimental }}
-      run: pytest -rA --ckan-ini=test.ini --cov=ckanext.xloader --disable-warnings ckanext/xloader/tests --junit-xml=/tmp/artifacts/junit/results.xml
+      run: pytest --ckan-ini=test.ini --cov=ckanext.xloader --disable-warnings ckanext/xloader/tests --junit-xml=/tmp/artifacts/junit/results.xml
 
     - name: ${{ matrix.experimental && '**Fail_Ignored** ' || '' }} Test Summary
       uses: test-summary/action@v2

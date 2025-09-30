@@ -81,13 +81,6 @@ def data(create_with_upload, apikey):
     }
 
 
-def _worker_arguments(data):
-    """ Returns a list of arguments suitable for a Click invocation
-    to launch a worker that will consume the associated XLoader submission.
-    """
-    return ["jobs", "worker", "default" + hash(data) % 2, "--burst"]
-
-
 @pytest.mark.usefixtures("clean_db", "with_plugins")
 @pytest.mark.ckan_config("ckanext.xloader.job_timeout", 2)
 @pytest.mark.ckan_config("ckan.jobs.timeout", 2)

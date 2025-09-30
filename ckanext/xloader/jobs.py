@@ -18,7 +18,6 @@ from rq import get_current_job
 from rq.timeouts import JobTimeoutException
 import sqlalchemy as sa
 
-from ckan import model
 from ckan.lib.jobs import DEFAULT_QUEUE_NAME
 from ckan.plugins.toolkit import get_action, asbool, enqueue_job, ObjectNotFound, config, h
 
@@ -35,6 +34,7 @@ SSL_VERIFY = asbool(config.get('ckanext.xloader.ssl_verify', True))
 if not SSL_VERIFY:
     requests.packages.urllib3.disable_warnings()
 
+DEFAULT_QUEUE_NAMES = config.get('ckanext.xloader.queue_names', DEFAULT_QUEUE_NAME).split()
 MAX_CONTENT_LENGTH = int(config.get('ckanext.xloader.max_content_length') or 1e9)
 # Don't try Tabulator load on large files
 MAX_TYPE_GUESSING_LENGTH = int(config.get('ckanext.xloader.max_type_guessing_length') or MAX_CONTENT_LENGTH / 10)
@@ -86,7 +86,6 @@ def is_retryable_error(error):
         return True
     return False
 
-DEFAULT_QUEUE_NAMES = config.get('ckanext.xloader.queue_names', DEFAULT_QUEUE_NAME).split()
 
 # input = {
 # 'api_key': user['apikey'],
