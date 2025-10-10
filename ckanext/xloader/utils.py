@@ -2,7 +2,6 @@
 
 from collections import defaultdict
 from decimal import Decimal
-import json
 import datetime
 import logging
 import re
@@ -10,7 +9,6 @@ from six import text_type as str, binary_type
 from urllib.parse import urlunparse, urlparse
 
 from ckan import model
-from ckan.lib import search
 import ckan.plugins.toolkit as tk
 
 from .job_exceptions import JobError
@@ -240,40 +238,10 @@ def set_resource_metadata(update_dict):
 
     Called after creation or deletion of DataStore table.
     '''
-    # We're modifying the resource extra directly here to avoid a
-    # race condition, see issue #3245 for details and plan for a
-    # better fix
 
-    q = model.Session.query(model.Resource). \
-        with_for_update(of=model.Resource). \
-        filter(model.Resource.id == update_dict['resource_id'])
-    resource = q.one()
-
-    # update extras in database for record
-    extras = resource.extras
-    extras.update(update_dict)
-    q.update({'extras': extras}, synchronize_session=False)
-
-    model.Session.commit()
-
-    # get package with updated resource from solr
-    # find changed resource, patch it and reindex package
-    psi = search.PackageSearchIndex()
-    solr_query = search.PackageSearchQuery()
-    q = {
-        'q': 'id:"{0}"'.format(resource.package_id),
-        'fl': 'data_dict',
-        'wt': 'json',
-        'fq': 'site_id:"%s"' % tk.config.get('ckan.site_id'),
-        'rows': 1
-    }
-    for record in solr_query.run(q)['results']:
-        solr_data_dict = json.loads(record['data_dict'])
-        for resource in solr_data_dict['resources']:
-            if resource['id'] == update_dict['resource_id']:
-                resource.update(update_dict)
-                psi.index_package(solr_data_dict)
-                break
+    if 'id' not in update_dict:
+        update_dict['id'] = update_dict.pop('resource_id')
+    tk.get_action('resource_patch')(data_dict=update_dict, context={'ignore_auth': True})
 
 
 def column_count_modal(rows):
