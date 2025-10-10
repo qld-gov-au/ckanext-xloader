@@ -105,6 +105,7 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
                 else:
                     assert xloader_status == 'pending'
                     time.sleep(1)
+            assert False, "Job did not terminate within ten seconds"
 
     def test_xloader_data_into_datastore_sync(self, cli, data):
         package_id = helpers.call_action('resource_show', id=data['metadata']['resource_id'])['package_id']
@@ -289,20 +290,23 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
         self.enqueue(jobs.xloader_data_into_datastore, [data])
 
         with mock.patch("ckanext.xloader.jobs._download_resource_data", mock_download_with_error):
-            stdout = cli.invoke(ckan, ["jobs", "worker", "--burst"]).output
-
-            if should_retry:
-                # Check that retry was attempted
-                assert "Job failed due to temporary error" in stdout
-                assert "retrying" in stdout
-                assert "Express Load completed" in stdout
-                # Verify resource was successfully loaded after retry
-                resource = helpers.call_action("resource_show", id=data["metadata"]["resource_id"])
-                assert resource["datastore_contains_all_records_of_source_file"]
-            else:
-                # Check that job failed without retry - should have error messages
-                assert "xloader error:" in stdout or "error" in stdout.lower()
-                assert "Express Load completed" not in stdout
+            cli.invoke(ckan, ["jobs", "worker", "--burst"])
+            for attempt in range(1, 10):
+                xloader_status = helpers.call_action("xloader_status", resource_id=data['metadata']['resource_id'])['status']
+                if xloader_status == 'complete':
+                    assert should_retry, "Expected fatal error, but job completed successfully"
+                    # Verify resource was successfully loaded after retry
+                    resource = helpers.call_action("resource_show", id=data["metadata"]["resource_id"])
+                    assert resource["datastore_contains_all_records_of_source_file"]
+                    return
+                elif xloader_status == 'error':
+                    # Check if error was expected
+                    assert not should_retry, "Unexpected fatal error in job"
+                    return
+                else:
+                    assert xloader_status == 'pending'
+                    time.sleep(1)
+            assert False, "Job did not terminate within ten seconds"
 
 
 @pytest.mark.usefixtures("clean_db")
