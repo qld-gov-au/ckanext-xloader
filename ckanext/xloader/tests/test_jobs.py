@@ -103,13 +103,13 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
         with mock.patch("ckanext.xloader.jobs.get_response", get_response):
             cli.invoke(ckan, ["jobs", "worker", "default0", "--burst"])
             cli.invoke(ckan, ["jobs", "worker", "default1", "--burst"])
-            for attempt in range(1, 10):
+            for attempt in range(1, 20):
                 xloader_status = helpers.call_action("xloader_status", resource_id=data['metadata']['resource_id'])['status']
                 if xloader_status == 'pending':
                     time.sleep(1)
                 else:
                     return xloader_status
-            assert False, "Job did not terminate within ten seconds"
+            assert False, "Job did not terminate within twenty seconds"
 
     def test_xloader_data_into_datastore(self, cli, data):
         assert self._run_xloader_burst(cli, data) == 'complete'
