@@ -108,6 +108,7 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
             for attempt in range(1, 20):
                 xloader_status = helpers.call_action("xloader_status", resource_id=data['metadata']['resource_id'])['status']
                 if xloader_status == 'pending':
+                    print("Job pending at {}, sleeping...".format(time.time()))
                     time.sleep(1)
                 else:
                     return xloader_status
