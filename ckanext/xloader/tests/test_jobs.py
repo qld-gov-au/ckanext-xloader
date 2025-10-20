@@ -94,18 +94,25 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
         assert jobs.get_default_queue_name("foo") == "default0"
         assert jobs.get_default_queue_name("meh") == "default1"
 
-    def test_xloader_data_into_datastore(self, cli, data):
+    def _run_xloader_burst(self, cli, data):
+        """ Queue the provided data, run a one-off worker to consume it,
+        and wait until it completes or errors, then return the job status,
+        "complete" or "error".
+        """
         self.enqueue(jobs.xloader_data_into_datastore, [data])
         with mock.patch("ckanext.xloader.jobs.get_response", get_response):
-            cli.invoke(ckan, ["jobs", "worker", "--burst"])
+            cli.invoke(ckan, ["jobs", "worker", "default0", "--burst"])
+            cli.invoke(ckan, ["jobs", "worker", "default1", "--burst"])
             for attempt in range(1, 10):
                 xloader_status = helpers.call_action("xloader_status", resource_id=data['metadata']['resource_id'])['status']
-                if xloader_status == 'complete':
-                    return
-                else:
-                    assert xloader_status == 'pending'
+                if xloader_status == 'pending':
                     time.sleep(1)
+                else:
+                    return xloader_status
             assert False, "Job did not terminate within ten seconds"
+
+    def test_xloader_data_into_datastore(self, cli, data):
+        assert self._run_xloader_burst(cli, data) == 'complete'
 
     def test_xloader_data_into_datastore_sync(self, cli, data):
         package_id = helpers.call_action('resource_show', id=data['metadata']['resource_id'])['package_id']
@@ -287,26 +294,15 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
                 # Non-retryable errors should not get a second chance
                 raise create_mock_error(error_type)
 
-        self.enqueue(jobs.xloader_data_into_datastore, [data])
-
         with mock.patch("ckanext.xloader.jobs._download_resource_data", mock_download_with_error):
-            cli.invoke(ckan, ["jobs", "worker", "--burst"])
-            for attempt in range(1, 10):
-                xloader_status = helpers.call_action("xloader_status", resource_id=data['metadata']['resource_id'])['status']
-                if xloader_status == 'complete':
-                    assert should_retry, "Expected fatal error, but job completed successfully"
-                    # Verify resource was successfully loaded after retry
-                    resource = helpers.call_action("resource_show", id=data["metadata"]["resource_id"])
-                    assert resource["datastore_contains_all_records_of_source_file"]
-                    return
-                elif xloader_status == 'error':
-                    # Check if error was expected
-                    assert not should_retry, "Unexpected fatal error in job"
-                    return
-                else:
-                    assert xloader_status == 'pending'
-                    time.sleep(1)
-            assert False, "Job did not terminate within ten seconds"
+            xloader_status = self._run_xloader_burst(cli, data)
+            if should_retry:
+                assert xloader_status == 'complete', "Unexpected fatal error in job"
+                # Verify resource was successfully loaded after retry
+                resource = helpers.call_action("resource_show", id=data["metadata"]["resource_id"])
+                assert resource["datastore_contains_all_records_of_source_file"]
+            else:
+                assert xloader_status == 'error', "Expected fatal error, but job completed successfully"
 
 
 @pytest.mark.usefixtures("clean_db")
