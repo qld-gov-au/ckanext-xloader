@@ -105,15 +105,16 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
         with mock.patch("ckanext.xloader.jobs.get_response", get_response):
             result = cli.invoke(ckan, ["jobs", "worker", "--burst"])
             assert 'Express Load starting' in result.output
-            for attempt in range(1, 20):
-                xloader_status = helpers.call_action("xloader_status", resource_id=data['metadata']['resource_id'])['status']
-                if xloader_status == 'pending':
+            for attempt in range(1, 10):
+                xloader_status = helpers.call_action("xloader_status", resource_id=data['metadata']['resource_id'])
+                print("Status of XLoading resource: {}".format(xloader_status))
+                if xloader_status['status'] == 'pending':
                     print("Job pending at {}, sleeping...".format(time.time()))
                     result = cli.invoke(ckan, ["jobs", "worker", "--burst"])
                     time.sleep(1)
                 else:
-                    return xloader_status
-            return xloader_status
+                    return xloader_status['status']
+            return xloader_status['status']
 
     def test_xloader_data_into_datastore(self, cli, data):
         assert self._run_xloader_burst(cli, data) == 'complete'
