@@ -58,7 +58,7 @@ def apikey():
 
 
 @pytest.fixture
-def data(create_with_upload, apikey):
+def data(create_with_upload, apikey, cli):
     dataset = factories.Dataset(with_custom_schema=False)
     resource = create_with_upload(
         _TEST_FILE_CONTENT,
@@ -66,6 +66,8 @@ def data(create_with_upload, apikey):
         url="http://data",
         package_id=dataset["id"]
     )
+    cli.invoke(ckan, ["jobs", "worker", "default0", "--burst"])
+    cli.invoke(ckan, ["jobs", "worker", "default1", "--burst"])
     callback_url = toolkit.url_for(
         "api.action", ver=3, logic_function="xloader_hook", qualified=True
     )
@@ -101,9 +103,8 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
         """
         self.enqueue(jobs.xloader_data_into_datastore, [data])
         with mock.patch("ckanext.xloader.jobs.get_response", get_response):
-            cli.invoke(ckan, ["jobs", "worker", "default0", "--burst"])
-            cli.invoke(ckan, ["jobs", "worker", "default1", "--burst"])
-            cli.invoke(ckan, ["jobs", "worker", "--burst"])
+            result = cli.invoke(ckan, ["jobs", "worker", "--burst"])
+            assert 'Express Load starting' in result.output
             for attempt in range(1, 20):
                 xloader_status = helpers.call_action("xloader_status", resource_id=data['metadata']['resource_id'])['status']
                 if xloader_status == 'pending':
