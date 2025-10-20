@@ -3,6 +3,7 @@
 import pytest
 import io
 import os
+import tempfile
 import time
 
 from datetime import datetime
@@ -49,6 +50,16 @@ def get_large_data_response(download_url, headers):
 
 def _get_temp_files(dir='/tmp'):
     return [os.path.join(dir, f) for f in os.listdir(dir) if os.path.isfile(os.path.join(dir, f))]
+
+
+@pytest.fixture
+def temp_file():
+    """ Generates a temporary file with content hash 'd44fa65eda3675e11710682fdb5f1648'
+    """
+    tmp_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.csv')
+    tmp_file.write(_TEST_FILE_CONTENT)
+    tmp_file.flush()
+    return tmp_file
 
 
 @pytest.fixture
@@ -116,8 +127,9 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
                     return xloader_status['status']
             return xloader_status['status']
 
-    def test_xloader_data_into_datastore(self, cli, data):
-        assert self._run_xloader_burst(cli, data) == 'complete'
+    def test_xloader_data_into_datastore(self, cli, data, temp_file):
+        with mock.patch("ckanext.xloader.jobs._download_resource_data", lambda: (temp_file, 'd44fa65eda3675e11710682fdb5f1648')):
+            assert self._run_xloader_burst(cli, data) == 'complete'
 
     def test_xloader_data_into_datastore_sync(self, cli, data):
         package_id = helpers.call_action('resource_show', id=data['metadata']['resource_id'])['package_id']
@@ -257,7 +269,7 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
         ("ValueError", False),
         ("TypeError", False),
     ])
-    def test_retry_behavior(self, cli, data, error_type, should_retry):
+    def test_retry_behavior(self, cli, data, error_type, should_retry, temp_file):
         """Test retry behavior for different error types."""
 
         def create_mock_error(error_type):
@@ -290,11 +302,7 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
                 raise create_mock_error(error_type)
             elif should_retry:
                 # Second call - return successful response only if retryable
-                import tempfile
-                tmp_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.csv')
-                tmp_file.write(_TEST_FILE_CONTENT)
-                tmp_file.flush()
-                return (tmp_file, 'd44fa65eda3675e11710682fdb5f1648')
+                return (temp_file, 'd44fa65eda3675e11710682fdb5f1648')
             else:
                 # Non-retryable errors should not get a second chance
                 raise create_mock_error(error_type)
