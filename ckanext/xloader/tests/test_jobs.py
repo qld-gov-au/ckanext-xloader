@@ -101,8 +101,7 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
         """
         self.enqueue(jobs.xloader_data_into_datastore, [data])
         with mock.patch("ckanext.xloader.jobs.get_response", get_response):
-            cli.invoke(ckan, ["jobs", "worker", "default0", "--burst"])
-            cli.invoke(ckan, ["jobs", "worker", "default1", "--burst"])
+            cli.invoke(ckan, ["jobs", "worker", "--burst"])
             for attempt in range(1, 20):
                 xloader_status = helpers.call_action("xloader_status", resource_id=data['metadata']['resource_id'])['status']
                 if xloader_status == 'pending':
