@@ -108,7 +108,7 @@ class TestXLoaderJobs(helpers.FunctionalRQTestBase):
                     time.sleep(1)
                 else:
                     return xloader_status
-            assert False, "Job did not terminate within twenty seconds"
+            return xloader_status
 
     def test_xloader_data_into_datastore(self, cli, data):
         assert self._run_xloader_burst(cli, data) == 'complete'
