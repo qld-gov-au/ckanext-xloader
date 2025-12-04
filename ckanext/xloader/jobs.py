@@ -228,6 +228,14 @@ def handle_retryable_error(e, input, job_id, job_dict, logger, error_state):
     error_state['errored'] = True
 
 
+def _cleanup_temp_file(tmp_file):
+    try:
+        tmp_file.close()
+        os.remove(tmp_file.name)
+    except FileNotFoundError:
+        pass
+
+
 def xloader_data_into_datastore_(input, job_dict, logger):
     '''This function:
     * downloads the resource (metadata) from CKAN
@@ -273,8 +281,7 @@ def xloader_data_into_datastore_(input, job_dict, logger):
             and not data.get('ignore_hash')):
         logger.info('Ignoring resource - the file hash hasn\'t changed: '
                     '{hash}.'.format(hash=file_hash))
-        tmp_file.close()
-        os.remove(tmp_file.name)
+        _cleanup_temp_file(tmp_file)
         return
     logger.info('File hash: %s', file_hash)
     resource['hash'] = file_hash
@@ -353,11 +360,7 @@ def xloader_data_into_datastore_(input, job_dict, logger):
         logger.error('Loading file raised an error: %s', e)
         raise JobError('Loading file raised an error: {}'.format(e))
     finally:
-        try:
-            tmp_file.close()
-            os.remove(tmp_file.name)
-        except FileNotFoundError:
-            pass
+        _cleanup_temp_file(tmp_file)
 
     logger.info('Express Load completed')
 
@@ -426,7 +429,7 @@ def _download_resource_data(resource, data, api_key, logger):
         data['datastore_contains_all_records_of_source_file'] = True
 
     except DataTooBigError:
-        tmp_file.close()
+        _cleanup_temp_file(tmp_file)
         message = 'Data too large to load into Datastore: ' \
             '{cl} bytes > max {max_cl} bytes.' \
             .format(cl=cl or length, max_cl=MAX_CONTENT_LENGTH)
@@ -451,7 +454,7 @@ def _download_resource_data(resource, data, api_key, logger):
         response.close()
         data['datastore_contains_all_records_of_source_file'] = False
     except requests.exceptions.HTTPError as error:
-        tmp_file.close()
+        _cleanup_temp_file(tmp_file)
         # status code error
         logger.debug('HTTP error: %s', error)
         raise HTTPError(
@@ -463,7 +466,7 @@ def _download_resource_data(resource, data, api_key, logger):
         raise XLoaderTimeoutError('Connection timed out after {}s'.format(
                                   DOWNLOAD_TIMEOUT))
     except requests.exceptions.RequestException as e:
-        tmp_file.close()
+        _cleanup_temp_file(tmp_file)
         try:
             err_message = str(e.reason)
         except AttributeError:
@@ -473,7 +476,7 @@ def _download_resource_data(resource, data, api_key, logger):
             message=err_message, status_code=None,
             request_url=url, response=None)
     except JobTimeoutException:
-        tmp_file.close()
+        _cleanup_temp_file(tmp_file)
         logger.warning('Job timed out after %ss', RETRIED_JOB_TIMEOUT)
         raise JobError('Job timed out after {}s'.format(RETRIED_JOB_TIMEOUT))
 

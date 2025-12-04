@@ -387,6 +387,7 @@ def load_csv(csv_filepath, resource_id, mimetype='text/csv', allow_type_guessing
 
         finally:
             cur.close()
+            os.remove(csv_filepath)
 
     logger.info('...copying done')
 
