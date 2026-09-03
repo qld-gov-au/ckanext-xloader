@@ -18,9 +18,27 @@ import sqlalchemy as sa
 
 import ckan.plugins as p
 
+from .interfaces import IXloader
 from .job_exceptions import FileCouldNotBeLoadedError, LoaderError
 from .parser import CSV_SAMPLE_LINES, TypeConverter
 from .utils import cleanup_temp_file, datastore_resource_exists, headers_guess, type_guess
+
+
+def _notify_datastore_before_update(resource_id, existing_fields, new_headers):
+    """Notify IXloader plugins that the DataStore table for ``resource_id``
+    is about to change. See ``IXloader.datastore_before_update``.
+
+    The internal ``_id`` column is stripped from ``existing_fields`` so
+    consumers only see user-visible columns.
+    """
+    if existing_fields is not None:
+        existing_fields = [f for f in existing_fields if f.get('id') != '_id']
+    for plugin in p.PluginImplementations(IXloader):
+        plugin.datastore_before_update(
+            resource_id=resource_id,
+            existing_fields=existing_fields,
+            new_headers=new_headers,
+        )
 
 from ckan.plugins.toolkit import config
 
@@ -241,8 +259,7 @@ def split_copy_by_size(input_file, engine, logger, resource_id, headers, delimit
 
     logger.info('Completed chunked processing: %s chunks processed for file size %s bytes', chunk_count, file_size)
     if infile:
-        infile.close()
-        os.remove(infile.name)
+        cleanup_temp_file(infile)
 
 
 def _read_metadata(table_filepath, mimetype, logger):
@@ -356,11 +373,21 @@ def load_csv(csv_filepath, resource_id, mimetype='text/csv', allow_type_guessing
         '''
         fields_match = _fields_match(fields, existing_fields, logger)
         if fields_match == FieldMatch.EXACT_MATCH:
+            _notify_datastore_before_update(
+                resource_id=resource_id,
+                existing_fields=existing_fields,
+                new_headers=fields,
+            )
             logger.info('Clearing records for "%s" from DataStore.', resource_id)
             _clear_datastore_resource(resource_id)
         else:
             logger.info('Deleting "%s" from DataStore.', resource_id)
             delete_datastore_resource(resource_id)
+            _notify_datastore_before_update(
+                resource_id=resource_id,
+                existing_fields=existing_fields,
+                new_headers=fields,
+            )
             # if file structure has changed,
             # and it wasn't just from a Data Dictionary override,
             # then we need to re-guess types
@@ -372,6 +399,11 @@ def load_csv(csv_filepath, resource_id, mimetype='text/csv', allow_type_guessing
              'type': 'text',
              'strip_extra_white': True}
             for header_name in headers]
+        _notify_datastore_before_update(
+            resource_id=resource_id,
+            existing_fields=None,
+            new_headers=fields,
+        )
 
     logger.info('Fields: %s', fields)
 
@@ -407,7 +439,9 @@ def load_csv(csv_filepath, resource_id, mimetype='text/csv', allow_type_guessing
 
         # Create table
         from ckan import model
-        context = {'model': model, 'ignore_auth': True}
+
+        user = p.toolkit.get_action("get_site_user")({"ignore_auth": True}, {})
+        context = {'model': model, 'ignore_auth': True, "user": user["name"]}
         data_dict = dict(
             resource_id=resource_id,
             fields=fields,
@@ -590,6 +624,11 @@ def load_table(table_filepath, resource_id, mimetype='text/csv', logger=None):
         Otherwise 'datastore_create' will append to the existing datastore.
         And if the fields have significantly changed, it may also fail.
         '''
+        _notify_datastore_before_update(
+            resource_id=resource_id,
+            existing_fields=existing_fields,
+            new_headers=headers_dicts,
+        )
         if existing:
             if _fields_match(headers_dicts, existing_fields, logger) == FieldMatch.EXACT_MATCH:
                 logger.info('Clearing records for "%s" from DataStore.', resource_id)
@@ -739,10 +778,9 @@ def _enable_fulltext_trigger(connection, resource_id):
 
 
 def _get_rows_count_of_resource(connection, table):
-    count_query = ''' SELECT count(_id) from {table} '''.format(table=table)
-    results = connection.execute(count_query)
-    rows_count = int(results.first()[0])
-    return rows_count
+    tbl = sa.table(table, sa.column("_id"))
+    rows_count = connection.scalar(sa.select(sa.func.count(tbl.c._id)).select_from(tbl))
+    return rows_count or 0
 
 
 def _populate_fulltext(connection, resource_id, fields, logger):
@@ -776,7 +814,7 @@ def _populate_fulltext(connection, resource_id, fields, logger):
     '''
     try:
         # Get total row count to determine chunking strategy
-        rows_count = _get_rows_count_of_resource(connection, identifier(resource_id))
+        rows_count = _get_rows_count_of_resource(connection, resource_id)
     except Exception as e:
         rows_count = ''
         logger.info("Failed to get resource rows count: {} ".format(str(e)))
@@ -792,7 +830,7 @@ def _populate_fulltext(connection, resource_id, fields, logger):
         for start in range(0, rows_count, chunks):
             try:
                 # Build SQL to update _full_text column with concatenated searchable content
-                sql = \
+                sql = sa.text(
                     '''
                     UPDATE {table}
                     SET _full_text = to_tsvector({cols}) WHERE _id BETWEEN {first} and {end};
@@ -810,7 +848,7 @@ def _populate_fulltext(connection, resource_id, fields, logger):
                         ),
                         first=start,
                         end=start + chunks
-                    )
+                    ))
                 connection.execute(sql)
                 logger.info("Indexed rows {first} to {end} of {total}".format(
                     first=start, end=min(start + chunks, rows_count), total=rows_count))
@@ -828,8 +866,8 @@ def calculate_record_count(resource_id, logger):
     '''
     logger.info('Calculating record count (running ANALYZE on the table)')
     engine = get_write_engine()
-    conn = engine.connect()
-    conn.execute(sa.text("ANALYZE \"{resource_id}\";"
+    with engine.connect() as conn:
+        conn.execute(sa.text("ANALYZE \"{resource_id}\";"
                          .format(resource_id=resource_id)))
 
 
