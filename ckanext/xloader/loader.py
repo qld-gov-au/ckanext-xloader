@@ -40,7 +40,7 @@ def _notify_datastore_before_update(resource_id, existing_fields, new_headers):
             new_headers=new_headers,
         )
 
-from ckan.plugins.toolkit import config
+from ckan.plugins.toolkit import config, _
 
 import ckanext.datastore.backend.postgres as datastore_db
 
@@ -52,6 +52,49 @@ MAX_COLUMN_LENGTH = 63
 tabulator_config.CSV_SAMPLE_LINES = CSV_SAMPLE_LINES
 
 SINGLE_BYTE_ENCODING = 'cp1252'
+
+
+def _should_keep_cell(index, cell, header_count, row_number=None):
+    """Return whether a cell should be kept, given it may exceed the headers.
+
+    Some exporters (notably Microsoft Excel) append extra empty cells to the
+    header and/or body, so a row can be wider than the declared columns. Blank
+    header cells don't produce a column, which is why the row length no longer
+    matches the column count.
+
+    Shared by both load paths (``load_csv`` and ``load_table``) so they treat
+    surplus cells identically. When ``row_number`` is given (the file line the
+    user sees), it is included in the error to help locate the problem.
+
+    :returns: ``True`` if the cell is within the declared columns and should be
+        used, ``False`` if it is a surplus blank cell that should be ignored.
+    :raises LoaderError: if the surplus cell holds real data, since dropping it
+        would silently lose data.
+    """
+    if index < header_count:
+        return True
+    # Out of bounds. Ignore it only if it's blank; a real value here means the
+    # row genuinely has more data than the header describes.
+    if cell is None or str(cell).strip() == '':
+        return False
+    # A surplus cell holding real data usually means one of the values in the
+    # row contained a comma or a double-quote that wasn't wrapped in quotes,
+    # which split it into extra columns. Explain that, and point at the offending
+    # value (and the row, when we know it) to help the publisher fix the file.
+    # The lead falls back to "A row has..." when we don't know the row, and
+    # names it ("Row 3 has...") when we do; the rest of the guidance is shared.
+    if row_number is None:
+        lead = _("A row has more values than the {columns} column(s) in the "
+                 "header.").format(columns=header_count)
+    else:
+        lead = _("Row {row} has more values than the {columns} column(s) in "
+                 "the header.").format(row=row_number, columns=header_count)
+    detail = _(
+        "The extra value is: '{value}'. This usually means a value in the row "
+        "contains a comma or double-quote that is not wrapped in double-quotes, "
+        "splitting it into extra columns. If the file genuinely has an extra "
+        "column, add it to the header row.").format(value=cell)
+    raise LoaderError(lead + " " + detail)
 
 
 class FieldMatch(Enum):
@@ -262,6 +305,44 @@ def split_copy_by_size(input_file, engine, logger, resource_id, headers, delimit
         cleanup_temp_file(infile)
 
 
+# Explicit map of the tabular mimetypes we support to the short format name
+# tabulator expects. Used only as a fallback when the file extension didn't
+# yield a readable format.
+#
+# The previous fallback took the part of the mimetype after '/', but that part
+# isn't always the file extension: for example
+# 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' gives
+# 'vnd.openxmlformats-...sheet' rather than 'xlsx', which tabulator can't open
+# and then reports the misleading "doesn't have a sheet 1" instead of the real
+# cause. Listing every supported mimetype (even ones like 'text/csv' where the
+# suffix already happens to be the extension) keeps this a single, explicit
+# source of truth and independent of whatever the suffix fallback produces.
+MIMETYPE_FORMATS = {
+    'text/csv': 'csv',
+    'application/csv': 'csv',
+    'text/tab-separated-values': 'tsv',
+    'application/vnd.ms-excel': 'xls',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+    'application/vnd.oasis.opendocument.spreadsheet': 'ods',
+}
+
+
+def _format_from_mimetype(mimetype):
+    """Best-effort short format name (csv/xls/xlsx/...) from a mimetype.
+
+    Looks the mimetype up in ``MIMETYPE_FORMATS`` first. Only for an unknown
+    mimetype does it fall back to the substring after the last '/' (the
+    historical behaviour), which is correct when that suffix happens to be the
+    file extension but not otherwise.
+    """
+    if not mimetype:
+        return None
+    key = mimetype.lower().split(';')[0].strip()
+    if key in MIMETYPE_FORMATS:
+        return MIMETYPE_FORMATS[key]
+    return key.split('/')[-1]
+
+
 def _read_metadata(table_filepath, mimetype, logger):
     # Determine the header row
     logger.info('Determining column names and types')
@@ -275,13 +356,28 @@ def _read_metadata(table_filepath, mimetype, logger):
             header_offset, headers = headers_guess(stream.sample)
     except TabulatorException:
         try:
-            file_format = mimetype.lower().split('/')[-1]
+            # Fall back to a format derived from the mimetype, mapping known
+            # spreadsheet mimetypes to the name tabulator understands.
+            file_format = _format_from_mimetype(mimetype)
             with UnknownEncodingStream(table_filepath, file_format, decoding_result,
                                        skip_rows=[{'type': 'preset', 'value': 'blank'}],
                                        post_parse=[TypeConverter().convert_types]) as stream:
                 header_offset, headers = headers_guess(stream.sample)
         except TabulatorException as e:
-            raise LoaderError('Tabulator error: {}'.format(e))
+            # The low-level tabulator message (e.g. "doesn't have a sheet 1")
+            # rarely tells a publisher what to fix. The usual causes are a
+            # missing header row, an empty header cell, or a file whose real
+            # format doesn't match its name. Surface actionable guidance and
+            # keep the technical detail for support.
+            raise LoaderError(_(
+                "The file could not be read as a table. This usually means the "
+                "file is not really in the format its name suggests (for "
+                "example a CSV or an older .xls file renamed to .xlsx), or the "
+                "file is empty or corrupted. Please open the file and save it "
+                "again in the correct format (for example .xlsx or .csv), make "
+                "sure the first row contains a header for every column, then "
+                "upload it again. (Technical details: {details})").format(
+                    details=e))
     except Exception as e:
         raise FileCouldNotBeLoadedError(e)
 
@@ -407,16 +503,30 @@ def load_csv(csv_filepath, resource_id, mimetype='text/csv', allow_type_guessing
 
     logger.info('Fields: %s', fields)
 
-    def _make_whitespace_stripping_iter(super_iter):
-        def strip_white_space_iter():
+    field_count = len(fields)
+
+    def _make_row_normalizing_iter(super_iter):
+        # Drop surplus blank cells so rows that are wider than the header
+        # (e.g. Excel exports that append empty trailing cells) still line up
+        # with the declared columns instead of failing COPY with "extra data
+        # after last expected column". A surplus cell holding real data raises
+        # a LoaderError via _should_keep_cell rather than being dropped.
+        def normalize_row_iter():
             for row in super_iter():
-                if len(row) == len(fields):
+                # Trim trailing cells beyond the header. _should_keep_cell
+                # returns False for a surplus blank (safe to drop) and raises
+                # if a surplus cell holds real data.
+                while len(row) > field_count and \
+                        not _should_keep_cell(len(row) - 1, row[-1], field_count):
+                    row.pop()
+
+                if len(row) == field_count:
                     for _index, _cell in enumerate(row):
                         # only strip white space if strip_extra_white is True
                         if fields[_index].get('strip_extra_white', True) and isinstance(_cell, str):
                             row[_index] = _cell.strip()
                 yield row
-        return strip_white_space_iter
+        return normalize_row_iter
 
     # encoding (and line ending?)- use chardet
     # It is easier to reencode it as UTF8 than convert the name of the encoding
@@ -428,12 +538,12 @@ def load_csv(csv_filepath, resource_id, mimetype='text/csv', allow_type_guessing
         try:
             with UnknownEncodingStream(csv_filepath, file_format, decoding_result,
                                        skip_rows=skip_rows) as stream:
-                stream.iter = _make_whitespace_stripping_iter(stream.iter)
+                stream.iter = _make_row_normalizing_iter(stream.iter)
                 stream.save(**save_args)
         except (EncodingError, UnicodeDecodeError):
             with Stream(csv_filepath, format=file_format, encoding=SINGLE_BYTE_ENCODING,
                         skip_rows=skip_rows) as stream:
-                stream.iter = _make_whitespace_stripping_iter(stream.iter)
+                stream.iter = _make_row_normalizing_iter(stream.iter)
                 stream.save(**save_args)
         csv_filepath = f_write.name
 
@@ -576,20 +686,17 @@ def load_table(table_filepath, resource_id, mimetype='text/csv', logger=None):
                                skip_rows=skip_rows,
                                post_parse=[type_converter.convert_types]) as stream:
         def row_iterator():
-            for row in stream:
+            # Iterate with extended=True so we get tabulator's physical source
+            # row number. That is the line the publisher sees in their file,
+            # and it stays correct even when blank rows are skipped (unlike
+            # counting yielded rows ourselves).
+            for row_number, _headers, row in stream.iter(extended=True):
                 data_row = {}
                 for index, cell in enumerate(row):
-                    # Handle files that have extra blank cells in heading and body
-                    # eg from Microsoft Excel adding lots of empty cells on export.
-                    # Blank header cells won't generate a column,
-                    # so row length won't match column count.
-                    if index >= header_count:
-                        # error if there's actual data out of bounds, otherwise ignore
-                        if cell:
-                            raise LoaderError("Found data in column %s but resource only has %s header(s)",
-                                              index + 1, header_count)
-                        else:
-                            continue
+                    # Ignore surplus blank cells, error on surplus real data.
+                    if not _should_keep_cell(index, cell, header_count,
+                                             row_number=row_number):
+                        continue
                     data_row[headers[index]] = cell
                 yield data_row
         result = row_iterator()
@@ -685,12 +792,21 @@ def get_types():
 
 
 def encode_headers(headers):
+    # By default, transliterate headers to ASCII with unidecode, so that
+    # e.g. accented Latin characters are simplified rather than dropped.
+    # For non-Latin scripts (Hebrew, Arabic, Cyrillic, CJK, ...) unidecode
+    # can mangle or empty out a header entirely, so setting
+    # ckanext.xloader.unidecode_headers = False keeps the original text as-is.
+    if p.toolkit.asbool(config.get('ckanext.xloader.unidecode_headers', True)):
+        decode_func = unidecode
+    else:
+        decode_func = str
     encoded_headers = []
     for header in headers:
         try:
-            encoded_headers.append(unidecode(header))
+            encoded_headers.append(decode_func(header))
         except AttributeError:
-            encoded_headers.append(unidecode(str(header)))
+            encoded_headers.append(decode_func(str(header)))
 
     return encoded_headers
 
