@@ -37,6 +37,34 @@ def Session():
     Session.close()
 
 
+class TestFormatFromMimetype(object):
+    """_format_from_mimetype maps known mimetypes to the short format name
+    tabulator expects. The important case is the xlsx mimetype, whose part
+    after '/' isn't the file extension, so the old split-on-'/' fallback
+    produced a format tabulator couldn't open."""
+
+    def test_xlsx_mimetype_maps_to_xlsx(self):
+        mimetype = (
+            "application/vnd.openxmlformats-officedocument"
+            ".spreadsheetml.sheet"
+        )
+        assert loader._format_from_mimetype(mimetype) == "xlsx"
+
+    def test_legacy_xls_and_csv(self):
+        assert loader._format_from_mimetype("application/vnd.ms-excel") == "xls"
+        assert loader._format_from_mimetype("text/csv") == "csv"
+
+    def test_mimetype_with_charset_parameter(self):
+        assert loader._format_from_mimetype("text/csv; charset=utf-8") == "csv"
+
+    def test_unknown_mimetype_falls_back_to_suffix(self):
+        # Preserve the historical behaviour for anything we don't map.
+        assert loader._format_from_mimetype("application/json") == "json"
+
+    def test_none_mimetype(self):
+        assert loader._format_from_mimetype(None) is None
+
+
 @pytest.mark.skipif(
     p.toolkit.check_ckan_version(max_version='2.7.99'),
     reason="fixtures do not have permission populate full_text_trigger")
@@ -634,6 +662,55 @@ class TestLoadCsv(TestLoadBase):
         )
         assert len(self._get_records(Session, resource_id)) == 3
 
+    def test_with_extra_blank_cells(self, Session):
+        # Rows wider than the header, padded with trailing empty cells
+        # (e.g. Excel exports). load_csv's row-normalizing iter should drop
+        # the surplus blank cells so COPY doesn't fail with "extra data after
+        # last expected column". This exercises the load_csv path; the
+        # equivalent load_table coverage lives in TestLoadTabulator.
+        csv_filepath = get_sample_filepath("sample_with_extra_blank_cells.csv")
+        resource = factories.Resource()
+        resource_id = resource['id']
+        loader.load_csv(
+            csv_filepath,
+            resource_id=resource_id,
+            mimetype="text/csv",
+            logger=logger,
+        )
+        assert len(self._get_records(Session, resource_id)) == 1
+
+    def test_with_extra_blank_cells_data_only(self, Session):
+        # Header has 3 columns; each data row carries a single trailing blank
+        # cell. The surplus blanks should be dropped and both rows loaded.
+        csv_filepath = get_sample_filepath("extra_fields.csv")
+        resource = factories.Resource()
+        resource_id = resource['id']
+        loader.load_csv(
+            csv_filepath,
+            resource_id=resource_id,
+            mimetype="text/csv",
+            logger=logger,
+        )
+        assert len(self._get_records(Session, resource_id)) == 2
+
+    def test_row_with_extra_data_raises_friendly_error(self, Session):
+        # A data row wider than the header where the surplus cell holds real
+        # data. load_csv can't know the file line number, so the message names
+        # the column count and the offending value but no row number.
+        csv_filepath = get_sample_filepath("row_with_extra_data.csv")
+        resource = factories.Resource()
+        resource_id = resource['id']
+        with pytest.raises(LoaderError) as exception:
+            loader.load_csv(
+                csv_filepath,
+                resource_id=resource_id,
+                mimetype="text/csv",
+                logger=logger,
+            )
+        message = str(exception.value)
+        assert "more values than the 3 column(s)" in message
+        assert "surplus" in message
+
     def test_with_empty_lines(self, Session):
         csv_filepath = get_sample_filepath("sample_with_empty_lines.csv")
         resource = factories.Resource()
@@ -816,6 +893,29 @@ class TestLoadCsv(TestLoadBase):
         assert "id" in test_result_int_headers
         assert "nom" in test_result_int_headers
         assert "3" in test_result_int_headers
+
+    def test_encode_headers_transliterates_by_default(self):
+        hebrew_header = u"שם"
+        result = loader.encode_headers([u"id", hebrew_header])
+
+        assert "id" in result
+        assert hebrew_header not in result
+
+    @pytest.mark.ckan_config("ckanext.xloader.unidecode_headers", True)
+    def test_encode_headers_transliterates_when_unidecode_headers_true(self):
+        hebrew_header = u"שם"
+        result = loader.encode_headers([u"id", hebrew_header])
+
+        assert "id" in result
+        assert hebrew_header not in result
+
+    @pytest.mark.ckan_config("ckanext.xloader.unidecode_headers", False)
+    def test_encode_headers_preserves_unicode_when_unicode_headers_false(self):
+        hebrew_header = u"שם"
+        result = loader.encode_headers([u"id", hebrew_header])
+
+        assert "id" in result
+        assert hebrew_header in result
 
     def test_column_names(self, Session):
         csv_filepath = get_sample_filepath("column_names.csv")
@@ -1028,11 +1128,11 @@ class TestLoadUnhandledTypes(TestLoadBase):
                 mimetype="text/csv",
                 logger=logger,
             )
-        assert "Error with field definition" in str(exception.value)
-        assert (
-            '"<?xml version="1.0" encoding="utf-8" ?>" is not a valid field name'
-            in str(exception.value)
-        )
+        # The KML file parses as a single-column CSV whose body rows are wider
+        # than that one header. Surplus cells holding real data are now rejected
+        # up-front by _should_keep_cell (see load_csv's row-normalizing iter),
+        # so the load fails here rather than later at field-definition validation.
+        assert "more values than the 1 column(s)" in str(exception.value)
 
     def test_geojson(self):
         filepath = get_sample_filepath("polling_locations.geojson")
@@ -1634,6 +1734,26 @@ class TestLoadTabulator(TestLoadBase):
             logger=logger,
         )
         assert len(self._get_records(Session, resource_id)) == 2
+
+    def test_row_with_extra_data_reports_row_number(self, Session):
+        # Header has 3 columns; the third data row carries a surplus cell with
+        # real data. load_table should reject it with a friendly, translatable
+        # message that names the offending row (the file line the user sees)
+        # and the extra value, instead of an opaque tabulator error.
+        csv_filepath = get_sample_filepath("row_with_extra_data.csv")
+        resource = factories.Resource()
+        resource_id = resource['id']
+        with pytest.raises(LoaderError) as exception:
+            loader.load_table(
+                csv_filepath,
+                resource_id=resource_id,
+                mimetype="text/csv",
+                logger=logger,
+            )
+        message = str(exception.value)
+        assert "Row 3 has" in message
+        assert "more values than the 3 column(s)" in message
+        assert "surplus" in message
 
     def test_with_mixed_quotes(self, Session):
         csv_filepath = get_sample_filepath("sample_with_mixed_quotes.csv")

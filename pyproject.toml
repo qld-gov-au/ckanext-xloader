@@ -4,13 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ckanext-xloader"
-version = "2.4.0"
+version = "2.5.1+qgov.1"
 description = "Express Loader - quickly load data into CKAN DataStore"
 classifiers = [ "Development Status :: 5 - Production/Stable",
     "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.14",
 ]
@@ -33,12 +30,10 @@ maintainers = [
     {name = "Brett Jones (kowh-ai)", email = "datashades@linkdigital.com.au"},
 ]
 
-[project.readme]
-file = "README.md"
+readme = "README.md"
 content-type = "text/markdown"
 
-[project.license]
-text = "AGPL"
+license = "AGPL"
 
 [project.urls]
 Homepage = "https://github.com/ckan/ckanext-xloader"
